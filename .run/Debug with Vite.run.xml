@@ -1,0 +1,13 @@
+﻿<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Debug with Vite" type="JavascriptDebugType" engineId="5db7518f-b7d2-4c3a-9743-5ac738f8579c" uri="http://127.0.0.1:5173" useTemporaryUserDataDir="true">
+    <method v="2">
+      <option name="npmBeforeRunTask" enabled="true">
+        <package-json value="$PROJECT_DIR$/package.json" />
+        <command value="run" />
+        <scripts>
+          <script value="dev" />
+        </scripts>
+      </option>
+    </method>
+  </configuration>
+</component>
