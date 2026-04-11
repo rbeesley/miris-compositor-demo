@@ -1,6 +1,6 @@
 ﻿import * as THREE from 'three';
 import { MirisStream } from '@miris-inc/three';
-import { getMirisConfig } from './config';
+import { getMirisConfig } from './config/mirisEnv';
 
 export interface MirisLoadRequest {
     id: string;
@@ -22,6 +22,7 @@ export interface LoadedMirisAsset {
 type UntypedMirisStream = THREE.Group & {
     isStream?: true;
     addEventListener?: (type: string, listener: (event?: unknown) => void) => void;
+    isLoaded?: boolean;
 };
 
 export class MirisAdapter {
@@ -39,31 +40,23 @@ export class MirisAdapter {
     }
 
     async loadStream(request: MirisLoadRequest): Promise<LoadedMirisAsset> {
-        const root = this.createRoot(request);
-        const placeholder = this.createFallbackVisual(
-            request.id,
-            request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR
-        );
-
-        root.add(placeholder);
-        this.scene.add(root);
-
         const config = getMirisConfig();
-        const streamUuid = request.streamId || (request.id === 'asset-a' ? config.assetAId : undefined);
+        const streamUuid = request.streamId;
 
-        if (!streamUuid) {
-            console.warn(`No asset UUID configured for ${request.id}; using fallback.`);
-            return {
-                id: request.id,
-                root,
-                placeholder,
-                stream: undefined,
-                usingFallback: true,
-            };
-        }
+        if (!streamUuid || !config.viewerKey) {
+            const root = this.createRoot(request);
+            const placeholder = this.createFallbackVisual(
+                request.id,
+                request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
+            );
+            root.add(placeholder);
 
-        if (!config.viewerKey) {
-            console.warn(`Miris viewer key missing; using fallback for ${request.id}`);
+            console.warn(
+                !streamUuid
+                    ? `No asset UUID configured for ${request.id}; using fallback.`
+                    : `Miris viewer key missing; using fallback for ${request.id}`,
+            );
+
             return {
                 id: request.id,
                 root,
@@ -74,30 +67,62 @@ export class MirisAdapter {
         }
 
         try {
-            const stream = new MirisStream({uuid: streamUuid}) as UntypedMirisStream;
+            // Use MirisStream directly as the root to support viewerKey inheritance from MirisScene
+            const stream = new MirisStream({
+                uuid: streamUuid,
+            }) as MirisStream;
 
-            stream.position.set(0, 0.5, 0);
-            stream.rotation.set(0, 0, 0);
-            stream.scale.set(1, 1, 1);
+            stream.name = `miris-asset:${request.id}`;
+            stream.position.copy(request.position);
+            stream.rotation.copy(request.rotation);
+            stream.scale.copy(request.scale);
+
+            const placeholder = this.createFallbackVisual(
+                request.id,
+                request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
+            );
+            stream.add(placeholder);
+
+            console.info(`Creating Miris stream for ${request.id}`, {
+                streamId: request.streamId,
+                hasViewerKey: Boolean(config.viewerKey),
+            });
 
             if (typeof stream.addEventListener === 'function') {
-                stream.addEventListener('streamloaded', () => {
+                stream.addEventListener('streamloaded', (event: any) => {
                     placeholder.visible = false;
-                    console.info(`Miris stream loaded for ${request.id}`);
+                    console.info(`[Miris ${request.id}] streamloaded`, event);
                 });
+
+                stream.addEventListener('error', (event: any) => {
+                    console.error(`[Miris ${request.id}] error`, event);
+                });
+
+                // Check if already loaded
+                if (stream.isLoaded) {
+                    placeholder.visible = false;
+                    console.info(`[Miris ${request.id}] already loaded`);
+                }
             }
 
-            root.add(stream);
+            console.info(`Miris stream attached for ${request.id}`);
 
             return {
                 id: request.id,
-                root,
+                root: stream,
                 placeholder,
                 stream,
                 usingFallback: false,
             };
         } catch (error) {
             console.warn(`Failed to load Miris stream for ${request.id}:`, error);
+            const root = this.createRoot(request);
+            const placeholder = this.createFallbackVisual(
+                request.id,
+                request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
+            );
+            root.add(placeholder);
+
             return {
                 id: request.id,
                 root,
@@ -118,7 +143,6 @@ export class MirisAdapter {
         root.position.copy(request.position);
         root.rotation.copy(request.rotation);
         root.scale.copy(request.scale);
-
         return root;
     }
 
@@ -128,7 +152,6 @@ export class MirisAdapter {
         group.add(this.createFallbackWireframe());
         group.add(this.createFallbackPole());
         group.add(this.createFallbackLabel(id, color));
-
         return group;
     }
 
@@ -137,16 +160,15 @@ export class MirisAdapter {
             new THREE.BoxGeometry(
                 MirisAdapter.FALLBACK_BOX_SIZE,
                 MirisAdapter.FALLBACK_BOX_SIZE,
-                MirisAdapter.FALLBACK_BOX_SIZE
+                MirisAdapter.FALLBACK_BOX_SIZE,
             ),
             new THREE.MeshStandardMaterial({
                 color,
                 metalness: 0.1,
                 roughness: 0.8,
-            })
+            }),
         );
         box.position.y = 0.5;
-
         return box;
     }
 
@@ -156,30 +178,27 @@ export class MirisAdapter {
                 new THREE.BoxGeometry(
                     MirisAdapter.FALLBACK_WIREFRAME_SIZE,
                     MirisAdapter.FALLBACK_WIREFRAME_SIZE,
-                    MirisAdapter.FALLBACK_WIREFRAME_SIZE
-                )
+                    MirisAdapter.FALLBACK_WIREFRAME_SIZE,
+                ),
             ),
-            new THREE.LineBasicMaterial({color: 0x0f172a})
+            new THREE.LineBasicMaterial({ color: 0x0f172a }),
         );
         wire.position.y = 0.5;
-
         return wire;
     }
 
     private createFallbackPole(): THREE.Mesh {
         const pole = new THREE.Mesh(
             new THREE.CylinderGeometry(0.02, 0.02, MirisAdapter.FALLBACK_POLE_HEIGHT),
-            new THREE.MeshStandardMaterial({color: 0x475569})
+            new THREE.MeshStandardMaterial({ color: 0x475569 }),
         );
         pole.position.set(0, 1.5, 0);
-
         return pole;
     }
 
     private createFallbackLabel(id: string, color: number): THREE.Sprite {
         const label = this.createTextSprite(id, color);
         label.position.set(0, 2.1, 0);
-
         return label;
     }
 

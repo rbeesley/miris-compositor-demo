@@ -16,8 +16,9 @@
 
     export class MirisStream extends THREE.Group {
         constructor(options: { uuid: string; viewerKey?: string | null });
-        addEventListener?(type: string, listener: (event?: unknown) => void): void;
-        removeEventListener?(type: string, listener: (event?: unknown) => void): void;
+        addEventListener?(type: string, listener: (event?: any) => void): void;
+        removeEventListener?(type: string, listener: (event?: any) => void): void;
+        isLoaded?: boolean;
     }
 
     export class MirisControls {

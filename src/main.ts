@@ -1,130 +1,79 @@
 import './style.css';
-import * as THREE from 'three';
-import { createSceneContext } from './scene';
-import { MirisAdapter } from './mirisAdapter';
-import { Compositor, type StreamedSceneAsset } from './compositor';
-import { getMirisConfig } from './config';
-import type { SceneContext } from './scene';
+import { startAppSession, type AppSession } from './appSession';
 
-function ensureAppMount(): HTMLElement {
-  let app = document.getElementById('app');
+console.group('[boot]');
+console.info('time', new Date().toISOString());
+console.info('href', window.location.href);
+console.info('readyState', document.readyState);
+console.info('mode', import.meta.env.MODE);
+console.info('dev', import.meta.env.DEV);
+console.groupEnd();
 
-  if (!app) {
-    app = document.createElement('div');
-    app.id = 'app';
-    document.body.appendChild(app);
+window.addEventListener('DOMContentLoaded', () => {
+  console.info('[lifecycle] DOMContentLoaded');
+});
+
+window.addEventListener('load', () => {
+  console.info('[lifecycle] window.load');
+});
+
+window.addEventListener('error', (event) => {
+  console.error('[window.error]', event.message, event.error);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[unhandledrejection]', event.reason);
+});
+
+let activeSession: AppSession | null = null;
+let bootId = 0;
+
+function disposeActiveSession(reason: string): void {
+  console.info('[boot] disposeActiveSession:', reason);
+
+  if (!activeSession) {
+    console.info('[boot] no active session to dispose');
+    return;
   }
 
-  return app;
+  try {
+    activeSession.dispose();
+  } finally {
+    activeSession = null;
+  }
 }
 
-function addStatusBadge(message: string): void {
-  const badge = document.createElement('div');
-  badge.textContent = message;
+async function bootstrap(): Promise<void> {
+  const currentBootId = ++bootId;
+  console.group(`[boot:${currentBootId}]`);
+  console.time(`[boot:${currentBootId}] total`);
 
-  Object.assign(badge.style, {
-    position: 'fixed',
-    top: '12px',
-    left: '12px',
-    padding: '8px 12px',
-    background: 'rgba(15, 23, 42, 0.85)',
-    color: '#e2e8f0',
-    fontFamily: 'system-ui, sans-serif',
-    fontSize: '12px',
-    borderRadius: '8px',
-    zIndex: '1000',
-    pointerEvents: 'none',
-  });
+  try {
+    disposeActiveSession('before bootstrap');
 
-  document.body.appendChild(badge);
-}
-
-let activeCompositor: Compositor | null = null;
-let activeSceneContext: SceneContext | null = null;
-
-async function main() {
-  if (activeCompositor) {
-    activeCompositor.dispose();
-    activeCompositor = null;
+    console.info(`[boot:${currentBootId}] starting app session`);
+    activeSession = await startAppSession();
+    console.info(`[boot:${currentBootId}] app session started`);
+  } catch (error) {
+    console.error(`[boot:${currentBootId}] failed`, error);
+    throw error;
+  } finally {
+    console.timeEnd(`[boot:${currentBootId}] total`);
+    console.groupEnd();
   }
-  if (activeSceneContext) {
-    activeSceneContext.dispose();
-    activeSceneContext = null;
-  }
-
-  const config = getMirisConfig();
-  const mount = ensureAppMount();
-  
-  // Clear the mount in case something was left from a previous run
-  mount.innerHTML = '';
-
-  addStatusBadge(
-      config.viewerKey
-          ? 'Miris compositor: viewer key configured'
-          : 'Miris compositor: fallback only, set MIRIS_VIEWER_KEY'
-  );
-
-  const sceneContext = createSceneContext(mount, config.viewerKey);
-  const mirisAdapter = new MirisAdapter(sceneContext.scene);
-  const compositor = new Compositor(sceneContext, mirisAdapter);
-
-  activeSceneContext = sceneContext;
-  activeCompositor = compositor;
-
-  const assets: StreamedSceneAsset[] = [
-    {
-      id: 'asset-a',
-      streamId: config.assetAId || '',
-      position: new THREE.Vector3(0, 0, 0),
-      rotation: new THREE.Euler(0, 0, 0),
-      scale: new THREE.Vector3(1, 1, 1),
-      boundsMeters: new THREE.Vector3(1, 1, 1),
-      importance: 1.0,
-      depthBand: 'foreground',
-      debugColor: 0x3b82f6,
-    },
-    {
-      id: 'asset-b',
-      streamId: config.assetBId || '',
-      position: new THREE.Vector3(2.5, 0, -2.5),
-      rotation: new THREE.Euler(0, Math.PI * 0.2, 0),
-      scale: new THREE.Vector3(1, 1, 1),
-      boundsMeters: new THREE.Vector3(1, 1, 1),
-      importance: 0.75,
-      depthBand: 'midground',
-      debugColor: 0x10b981,
-    },
-    {
-      id: 'asset-c',
-      streamId: config.assetCId || '',
-      position: new THREE.Vector3(-3, 0, -5),
-      rotation: new THREE.Euler(0, -Math.PI * 0.15, 0),
-      scale: new THREE.Vector3(1, 1, 1),
-      boundsMeters: new THREE.Vector3(1, 1, 1),
-      importance: 0.5,
-      depthBand: 'background',
-      debugColor: 0xf59e0b,
-    },
-  ];
-
-  compositor.addDebugGround();
-  await compositor.loadAssets(assets);
-  compositor.start();
 }
 
 if (import.meta.hot) {
-  import.meta.hot.accept(() => {
-    if (activeCompositor) {
-      activeCompositor.dispose();
-      activeCompositor = null;
-    }
-    if (activeSceneContext) {
-      activeSceneContext.dispose();
-      activeSceneContext = null;
-    }
+  import.meta.hot.dispose(() => {
+    console.info('[hmr] dispose triggered');
+    disposeActiveSession('hmr dispose');
+  });
+
+  import.meta.hot.accept((newModule) => {
+    console.info('[hmr] accept triggered', newModule);
   });
 }
 
-main().catch((error) => {
-  console.error('Failed to start app:', error);
+void bootstrap().catch((error) => {
+  console.error('[boot] fatal startup failure', error);
 });

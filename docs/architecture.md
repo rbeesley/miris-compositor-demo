@@ -2,22 +2,33 @@
 
 ## Compositing Engine Overview
 
-The compositing engine is designed to handle multiple high-fidelity streaming assets from Miris XR.
+The compositing engine handles multiple high-fidelity streaming assets from Miris XR. It bridges the [Miris Web SDK](https://miris.com) with [three.js](https://threejs.org) to create unified spatial scenes.
 
 ### Core Components
 
-1.  **Scene Manager**: Responsible for managing the global three.js scene, camera, and renderer.
-2.  **Asset Loader**: Wraps the Miris Web SDK to handle asset loading and streaming status.
-3.  **Compositor**: Manages the relative spatial coordinates of loaded assets. It provides methods to position, scale, and rotate assets relative to each other or a global origin.
-4.  **LOD Synchronizer**: While Miris handles LOD per asset, the synchronizer ensures that assets at similar depths maintain a consistent visual fidelity and performance profile.
+1.  **Scene Manager (`scene.ts`)**: Initializes the three.js environment including the `MirisScene` (which acts as the root), renderer, camera, lights, and orbit controls.
+2.  **Asset Loader (`mirisAdapter.ts`)**: Wraps the Miris Web SDK. It handles `MirisStream` instantiation, attaches debug visuals (bounding boxes, labels), and manages asset lifecycles. If no stream ID is provided, it provides fallback visuals.
+3.  **Compositor (`compositor.ts`)**: The heart of the engine. It manages:
+    - **Hierarchical Transform Tree**: Positions, scales, and rotates assets. Supports parent-child relationships where transforms are relative.
+    - **Streaming Orchestration**: Tracks when all assets in a scene are fully loaded from the Miris servers.
+    - **Priority Scoring System**: Calculates real-time scores for each asset based on importance, distance, and depth band. These scores inform the Miris streaming logic to optimize performance and fidelity.
+    - **Asset Animation**: Applies dynamic runtime behaviors (e.g., rotation, vertical bounce) defined in the scene configuration.
+
+### Performance & Optimization (Priority Scoring)
+
+The engine implements a multi-factor priority scoring system:
+- **Importance (0-1)**: Author-defined base priority.
+- **Distance to Camera**: Assets closer to the user receive higher priority.
+- **Depth Band Bias**: Assets can be assigned to `foreground`, `midground`, or `background` bands, each providing a multiplier to the final score.
+- **Scene Weight**: Used to prioritize large "root scene" or context-heavy assets.
 
 ## Coordinate System
 
 The engine uses a right-handed coordinate system (standard in three.js). Assets are positioned using a relative coordinate system:
--   **Root Anchor**: A global reference point for the entire scene.
--   **Local Offsets**: Each asset has an offset relative to its parent anchor.
+- **Global Origin**: The `MirisScene` root.
+- **Local Offsets**: Each asset has an offset (`position`), `rotation`, and `scale` relative to its parent.
 
-## Implementation Details
+## Integration Details
 
--   **Miris Web SDK**: Provides the underlying streaming technology for large 3D models.
--   **three.js**: Handles the final rendering of the composited scene.
+- **Miris Web SDK**: Provides the underlying streaming technology for large 3D models via `MirisStream`.
+- **three.js**: The rendering runtime. `MirisScene` and `MirisStream` extend `THREE.Scene` and `THREE.Group` respectively, allowing for seamless integration.
