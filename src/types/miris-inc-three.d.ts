@@ -3,6 +3,12 @@
 
     export class MirisScene extends THREE.Scene {
         constructor(options?: { viewerKey?: string | null });
+    }
+
+    export class MirisStream extends THREE.Group {
+        constructor(options: { uuid: string; viewerKey?: string | null });
+        override addEventListener(type: string, listener: (event?: any) => void): void;
+        override removeEventListener(type: string, listener: (event?: any) => void): void;
         fetchAssets?(): Promise<
             Array<{
                 uuid: string;
@@ -10,27 +16,11 @@
                 tags?: string[];
                 thumbnailUrl?: string;
                 contentUrl?: string;
+                createdAt?: string;
+                updatedAt?: string;
+                views?: number;
             }>
         >;
-    }
-
-    export class MirisStream extends THREE.Group {
-        constructor(options: { uuid: string; viewerKey?: string | null });
-        addEventListener?(type: string, listener: (event?: any) => void): void;
-        removeEventListener?(type: string, listener: (event?: any) => void): void;
         isLoaded?: boolean;
-    }
-
-    export class MirisControls {
-        constructor(
-            camera: THREE.Camera,
-            domElement: HTMLElement,
-            objects?: Set<THREE.Object3D> | null
-        );
-
-        enabled: boolean;
-        objects: Set<THREE.Object3D>;
-        update?(): void;
-        dispose?(): void;
     }
 }

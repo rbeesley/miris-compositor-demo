@@ -8,6 +8,9 @@ export interface SceneNodeAnimation {
     rotateSpeed?: number;
     bounceAmplitude?: number;
     bounceFrequency?: number;
+    bounceAbsolute?: boolean; // Absolute sine wave (no descending below base position)
+    bounceClip?: boolean;     // Clip negative values of sine wave
+    bounceDirection?: Vec3;   // Direction of bounce, defaults to [0, 1, 0]
 }
 
 export interface SceneNodePriority {

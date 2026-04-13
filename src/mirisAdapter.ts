@@ -15,15 +15,11 @@ export interface LoadedMirisAsset {
     id: string;
     root: THREE.Group;
     placeholder: THREE.Object3D;
-    stream?: THREE.Object3D;
+    outline?: THREE.LineSegments;
+    stream?: MirisStream;
     usingFallback: boolean;
+    metadata?: any;
 }
-
-type UntypedMirisStream = THREE.Group & {
-    isStream?: true;
-    addEventListener?: (type: string, listener: (event?: unknown) => void) => void;
-    isLoaded?: boolean;
-};
 
 export class MirisAdapter {
     private static readonly DEFAULT_DEBUG_COLOR = 0x22c55e;
@@ -32,6 +28,7 @@ export class MirisAdapter {
     private static readonly FALLBACK_POLE_HEIGHT = 0.8;
     private static readonly LABEL_CANVAS_WIDTH = 256;
     private static readonly LABEL_CANVAS_HEIGHT = 96;
+    private static readonly OUTLINE_PADDING = 0.02;
 
     private readonly scene: THREE.Scene;
 
@@ -51,6 +48,10 @@ export class MirisAdapter {
             );
             root.add(placeholder);
 
+            const outline = this.createOutline();
+            root.add(outline);
+            outline.visible = false;
+
             console.warn(
                 !streamUuid
                     ? `No asset UUID configured for ${request.id}; using fallback.`
@@ -61,6 +62,7 @@ export class MirisAdapter {
                 id: request.id,
                 root,
                 placeholder,
+                outline,
                 stream: undefined,
                 usingFallback: true,
             };
@@ -82,6 +84,19 @@ export class MirisAdapter {
                 request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
             );
             stream.add(placeholder);
+
+            const outline = this.createOutline();
+            stream.add(outline);
+            outline.visible = false;
+
+            let metadata: any = undefined;
+            if (typeof stream.fetchAssets === 'function') {
+                stream.fetchAssets().then(assets => {
+                    if (assets && assets.length > 0) {
+                        metadata = assets[0];
+                    }
+                }).catch(err => console.warn(`Failed to fetch metadata for ${request.id}`, err));
+            }
 
             console.info(`Creating Miris stream for ${request.id}`, {
                 streamId: request.streamId,
@@ -111,8 +126,10 @@ export class MirisAdapter {
                 id: request.id,
                 root: stream,
                 placeholder,
+                outline,
                 stream,
                 usingFallback: false,
+                get metadata() { return metadata; }
             };
         } catch (error) {
             console.warn(`Failed to load Miris stream for ${request.id}:`, error);
@@ -123,10 +140,15 @@ export class MirisAdapter {
             );
             root.add(placeholder);
 
+            const outline = this.createOutline();
+            root.add(outline);
+            outline.visible = false;
+
             return {
                 id: request.id,
                 root,
                 placeholder,
+                outline,
                 stream: undefined,
                 usingFallback: true,
             };
@@ -237,5 +259,43 @@ export class MirisAdapter {
         sprite.scale.set(1.8, 0.675, 1);
 
         return sprite;
+    }
+
+    private createOutline(): THREE.LineSegments {
+        // Outline based on a box. We use 1.0 size as base (same as fallback box)
+        // or we could use bounding boxes if streams provide them.
+        // For now, let's use a 1.1x box for the aura/selection.
+        const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1 + MirisAdapter.OUTLINE_PADDING, 1 + MirisAdapter.OUTLINE_PADDING, 1 + MirisAdapter.OUTLINE_PADDING));
+        const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+        const outline = new THREE.LineSegments(geometry, material);
+        outline.position.y = 0.5;
+        outline.name = 'asset-outline';
+        return outline;
+    }
+
+    public setOutlineState(asset: LoadedMirisAsset, state: 'none' | 'hover' | 'selected'): void {
+        if (!asset.outline) return;
+
+        const outline = asset.outline;
+        const material = outline.material as THREE.LineBasicMaterial;
+
+        switch (state) {
+            case 'none':
+                outline.visible = false;
+                break;
+            case 'hover':
+                outline.visible = true;
+                material.opacity = 0.5;
+                material.color.set(0x3b82f6); // Blue-ish aura
+                // Partial wireframe effect is harder with LineSegments directly,
+                // but we can adjust opacity or use a custom shader if needed.
+                // For now, let's keep it simple with opacity.
+                break;
+            case 'selected':
+                outline.visible = true;
+                material.opacity = 1.0;
+                material.color.set(0xffffff); // White solid
+                break;
+        }
     }
 }

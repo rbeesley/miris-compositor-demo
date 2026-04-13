@@ -1,5 +1,5 @@
 ﻿import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { CameraControls } from './controls/CameraControls';
 import { MirisScene } from '@miris-inc/three';
 
 type MirisSceneWithEvents = MirisScene & {
@@ -12,7 +12,8 @@ export interface SceneContext {
     mirisScene: MirisSceneWithEvents;
     camera: THREE.PerspectiveCamera;
     renderer: THREE.WebGLRenderer;
-    controls: OrbitControls;
+    controls: CameraControls;
+    cameraAnchor: THREE.Object3D;
     timer: THREE.Timer;
     mount: HTMLElement;
     mirisReady: Promise<void>;
@@ -56,8 +57,12 @@ export function createSceneContext(
     const width = mount.clientWidth || window.innerWidth;
     const height = mount.clientHeight || window.innerHeight;
 
+    const cameraAnchor = new THREE.Object3D();
+    scene.add(cameraAnchor);
+
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.set(1.5, 1.5, 2.5);
+    cameraAnchor.add(camera);
 
     const renderer = new THREE.WebGLRenderer({
         antialias: true,
@@ -69,10 +74,7 @@ export function createSceneContext(
 
     mount.appendChild(renderer.domElement);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.target.set(0, 1, 0);
-    controls.update();
+    const controls = new CameraControls(camera, renderer.domElement, cameraAnchor);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.25);
     scene.add(ambientLight);
@@ -104,6 +106,7 @@ export function createSceneContext(
         camera,
         renderer,
         controls,
+        cameraAnchor,
         timer,
         mount,
         mirisReady,

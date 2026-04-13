@@ -33,9 +33,12 @@ interface SceneNodeDefinition {
   animation?: {
     rotate?: boolean;        // If true, the node rotates continuously
     rotateSpeed?: number;    // Rotation speed (default: 0.003)
-    bounce?: boolean;        // If true, the node bounces vertically
+    bounce?: boolean;        // If true, the node bounces/oscillates
     bounceAmplitude?: number; // Bounce distance (default: 0.05)
     bounceFrequency?: number; // Bounce speed (default: 1.5)
+    bounceAbsolute?: boolean; // If true, use absolute sine wave (no descending below base position)
+    bounceClip?: boolean;     // If true, clip negative values of the sine wave (stops at base position)
+    bounceDirection?: [number, number, number]; // Direction of bounce (default: [0, 1, 0])
   };
   priority: {
     importance: number;      // Base importance (0 to 1)

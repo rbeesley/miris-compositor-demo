@@ -8,7 +8,9 @@ This project is a compositing engine capable of:
 - **Streaming multiple high-fidelity 3D assets** via Miris XR Web SDK.
 - **Hierarchical Asset Positioning**: Assets are placed in a unified three.js scene with relative spatial coordinates (parent-child transforms).
 - **Dynamic Priority Scoring**: Calculates real-time priority scores based on distance to camera, asset importance, and depth bands to optimize streaming resources.
-- **Built-in Animations**: Supports simple animations like rotation and vertical bouncing, defined directly in the scene configuration.
+- **Scene Interaction & Focus**: Select assets with a click to center the view, attach the camera to follow moving objects, and see live metadata from the Miris API.
+- **Custom Camera System**: A custom first-person style camera with world/local movement switching, anchoring to assets, and smooth focus transitions.
+- **Built-in Animations**: Supports rotations and customizable oscillations (bounce) with configurable directions and clipping behaviors.
 - **Modern Workflow**: Fast development using Vite and type-safe development with TypeScript.
 
 ## Architecture

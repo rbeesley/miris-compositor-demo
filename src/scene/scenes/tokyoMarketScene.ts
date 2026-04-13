@@ -59,7 +59,11 @@ export const tokyoMarketScene: SceneDefinition = {
             },
             animation: {
                 rotate: true,
-                bounce: false,
+                bounce: true,
+                bounceAmplitude: 0.01,
+                bounceFrequency: 2.0,
+                bounceAbsolute: true,
+                bounceDirection: [0, 1, 0],
             },
             priority: {
                 importance: 0.75,
