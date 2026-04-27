@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "vite: dev",
+      "type": "npm",
+      "script": "dev",
+      "path": "",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": false
+      },
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": ".",
+          "file": 1,
+          "line": 1,
+          "column": 1,
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Local:\\s+http://127\\.0\\.0\\.1:5173|Local:\\s+http://localhost:5173|ready in .*"
+        }
+      }
+    },
+    {
+      "label": "vite: stop",
+      "type": "shell",
+      "command": "taskkill /F /IM node.exe /T",
+      "windows": {
+        "command": "taskkill /F /IM node.exe /T"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

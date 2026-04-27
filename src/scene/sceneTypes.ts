@@ -2,6 +2,12 @@
 export type SceneNodeId = string;
 export type Vec3 = [number, number, number];
 
+export interface SceneCameraDefinition {
+    position: Vec3;
+    rotation: Vec3; // Radians (X, Y, Z)
+    zoom?: number;
+}
+
 export interface SceneNodeAnimation {
     rotate?: boolean;
     bounce?: boolean;
@@ -25,13 +31,16 @@ export interface SceneNodeTransform {
     scale: Vec3;
 }
 
+export type ViewerKeyMap = Record<string, string>;
+
 export interface SceneNodeDefinition {
     id: SceneNodeId;
     label: string;
-    streamId: string;
+    streamId?: string;
+    viewerKey?: string; // Hardcoded key or reference to a group in SceneDefinition
     parentId?: SceneNodeId;
     transform: SceneNodeTransform;
     animation?: SceneNodeAnimation;
-    priority: SceneNodePriority;
+    priority?: SceneNodePriority;
     debugColor?: number;
 }

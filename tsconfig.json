@@ -17,7 +17,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["src", "tools"],
   "references": [
     { "path": "./tsconfig.node.json"}
   ]

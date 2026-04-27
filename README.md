@@ -9,6 +9,8 @@ This project is a compositing engine capable of:
 - **Hierarchical Asset Positioning**: Assets are placed in a unified three.js scene with relative spatial coordinates (parent-child transforms).
 - **Dynamic Priority Scoring**: Calculates real-time priority scores based on distance to camera, asset importance, and depth bands to optimize streaming resources.
 - **Scene Interaction & Focus**: Select assets with a click to center the view, attach the camera to follow moving objects, and see live metadata from the Miris API.
+- **URL-based State Persistence**: Save and restore camera position, orientation, anchored assets, and selection state via the browser URL hash for easy sharing and bookmarking.
+- **Multi-Key Authentication**: Support for multiple viewer keys and key groups within a single scene (compositor-level implementation).
 - **Custom Camera System**: A custom first-person style camera with world/local movement switching, anchoring to assets, and smooth focus transitions.
 - **Built-in Animations**: Supports rotations and customizable oscillations (bounce) with configurable directions and clipping behaviors.
 - **Modern Workflow**: Fast development using Vite and type-safe development with TypeScript.
@@ -65,3 +67,4 @@ Active development.
 - [x] Hierarchical Compositing engine logic.
 - [x] Priority-based scoring system.
 - [x] Scene definition system.
+- [x] URL state persistence and sharing.

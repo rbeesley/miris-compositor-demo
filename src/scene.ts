@@ -8,8 +8,7 @@ type MirisSceneWithEvents = MirisScene & {
 };
 
 export interface SceneContext {
-    scene: THREE.Scene;
-    mirisScene: MirisSceneWithEvents;
+    scene: MirisSceneWithEvents;
     camera: THREE.PerspectiveCamera;
     renderer: THREE.WebGLRenderer;
     controls: CameraControls;
@@ -25,13 +24,12 @@ export function createSceneContext(
     viewerKey?: string,
 ): SceneContext {
     const mirisScene = new MirisScene({ viewerKey: viewerKey ?? null }) as MirisSceneWithEvents;
-    const scene = mirisScene as unknown as THREE.Scene;
 
     const mirisReady = new Promise<void>((resolve) => {
         const timeout = setTimeout(() => {
-            console.warn('[MirisScene] mirisReady timed out after 5 seconds, proceeding anyway');
+            console.warn('[MirisScene] mirisReady timed out after 1 second, proceeding anyway');
             resolve();
-        }, 5000);
+        }, 1000);
 
         if (typeof mirisScene.addEventListener === 'function') {
             mirisScene.addEventListener('sceneloaded', (event) => {
@@ -52,13 +50,13 @@ export function createSceneContext(
         }
     });
 
-    scene.background = new THREE.Color(0xe5e7eb);
+    mirisScene.background = new THREE.Color(0xe5e7eb);
 
     const width = mount.clientWidth || window.innerWidth;
     const height = mount.clientHeight || window.innerHeight;
 
     const cameraAnchor = new THREE.Object3D();
-    scene.add(cameraAnchor);
+    mirisScene.add(cameraAnchor);
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.set(1.5, 1.5, 2.5);
@@ -77,15 +75,15 @@ export function createSceneContext(
     const controls = new CameraControls(camera, renderer.domElement, cameraAnchor);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.25);
-    scene.add(ambientLight);
+    mirisScene.add(ambientLight);
 
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.25);
     keyLight.position.set(8, 12, 6);
-    scene.add(keyLight);
+    mirisScene.add(keyLight);
 
     const fillLight = new THREE.DirectionalLight(0x9ec5ff, 0.75);
     fillLight.position.set(-6, 6, -8);
-    scene.add(fillLight);
+    mirisScene.add(fillLight);
 
     const timer = new THREE.Timer();
 
@@ -101,8 +99,7 @@ export function createSceneContext(
     window.addEventListener('resize', onResize);
 
     return {
-        scene,
-        mirisScene,
+        scene: mirisScene,
         camera,
         renderer,
         controls,

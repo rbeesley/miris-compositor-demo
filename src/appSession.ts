@@ -3,7 +3,11 @@ import { MirisAdapter } from './mirisAdapter';
 import { Compositor } from './compositor';
 import { getMirisConfig } from './config/mirisEnv';
 import type { SceneContext } from './scene';
-import { tokyoMarketScene } from './scene/scenes/tokyoMarketScene';
+// import { tokyoMarketScene } from './scene/scenes/tokyoMarketScene';
+import { tokyoMarketScene } from './scene/scenes/tokyoMarketSceneMirisPlayer';
+// import { tokyoMarketScene } from './scene/scenes/tokyoMarketSceneMixedViewerKeys';
+import { getCameraStateFromUrl, updateUrlFromCamera, debounce } from './utils/urlState';
+import type { CameraState } from './utils/urlState';
 
 export type AppSession = {
     compositor: Compositor;
@@ -28,6 +32,13 @@ function ensureAppMount(): HTMLElement {
 
 function addStatusBadge(message: string): void {
     let badge = document.getElementById('app-status-badge');
+
+    setTimeout(() => {
+        const badge = document.getElementById('app-status-badge');
+        if (badge) {
+            badge.remove();
+        }
+    }, 5000);
 
     if (!badge) {
         badge = document.createElement('div');
@@ -60,8 +71,31 @@ export async function startAppSession(): Promise<AppSession> {
 
     try {
         const config = getMirisConfig();
+        const resolvedKeys: Record<string, string> = {};
+        if (config.viewerKeys) {
+            Object.assign(resolvedKeys, config.viewerKeys);
+        }
+        if (tokyoMarketScene.viewerKeys) {
+            for (const group of tokyoMarketScene.viewerKeys) {
+                Object.assign(resolvedKeys, group);
+            }
+        }
+
+        // Helper to resolve a key from literal or group
+        const resolveKey = (key: string | undefined): string | undefined => {
+            if (!key) return undefined;
+            // If the key exists in our map, use the mapped value
+            if (resolvedKeys[key]) return resolvedKeys[key];
+            // Otherwise, it might be a literal key
+            return key;
+        };
+
+        const sceneViewerKey = resolveKey(tokyoMarketScene.viewerKey) || config.viewerKey;
+
         console.info('[config] resolved', {
-            hasViewerKey: !!config.viewerKey,
+            configViewerKey: config.viewerKey,
+            sceneViewerKey: sceneViewerKey,
+            resolvedKeysCount: Object.keys(resolvedKeys).length,
             config,
         });
 
@@ -70,13 +104,13 @@ export async function startAppSession(): Promise<AppSession> {
         mount.innerHTML = '';
 
         addStatusBadge(
-            config.viewerKey
+            sceneViewerKey
                 ? 'Miris compositor: viewer key configured'
                 : 'Miris compositor: fallback only, set VITE_MIRIS_VIEWER_KEY',
         );
 
         console.time('[session] createSceneContext');
-        const sceneContext = createSceneContext(mount, config.viewerKey);
+        const sceneContext = createSceneContext(mount, sceneViewerKey);
         console.timeEnd('[session] createSceneContext');
         console.info('[scene] context created', sceneContext);
 
@@ -116,8 +150,80 @@ export async function startAppSession(): Promise<AppSession> {
         console.timeEnd('[session] compositor.ready');
         console.info('[session] Miris scene + streams fully ready');
 
+        const onHashChange = () => {
+            if (isApplyingUrlState) return;
+            const state = getCameraStateFromUrl();
+            if (state) {
+                applyState(state);
+            }
+        };
+        
+        let isApplyingUrlState = false;
+        const applyState = (state: CameraState) => {
+            console.log('[session] applyState', state);
+            isApplyingUrlState = true;
+            
+            const hasCoordinates = state.cx !== undefined && state.cy !== undefined && state.cz !== undefined &&
+                                 state.qx !== undefined && state.qy !== undefined && state.qz !== undefined && state.qw !== undefined;
+
+            // 1. Establish anchor (aid)
+            if (state.aid) {
+                // If we have coordinates, we just want to force the anchor without focusing
+                // If we don't have coordinates, we want to simulate a link click (anchor + focus)
+                const smooth = !hasCoordinates;
+                const requestLock = !hasCoordinates;
+                compositor.selectAsset(state.aid, smooth, requestLock, true);
+            } else if (hasCoordinates || state.sid) {
+                // If coordinates are present but no aid, or if sid is present but no aid, ensure we are decoupled
+                // if aid is explicitly missing in a partial state that has sid, we might not want to decouple if we were anchored?
+                // The user said: "If it is only an sid, aid remains the same as it currently is, but we select the sid asset."
+                // So if state.aid is undefined, we DO NOT call selectAsset(null) unless it's explicitly 'null' or if we are applying a full state without aid.
+                if (hasCoordinates && !state.aid) {
+                    compositor.selectAsset(null, false, false, true);
+                }
+            } else if (state.aid === null) {
+                compositor.selectAsset(null, false, false, true);
+            }
+
+            // 2. Apply explicit selection if present (sid)
+            if (state.sid !== undefined && state.sid !== state.aid) {
+                compositor.selectAsset(state.sid || null, false, false, false);
+            }
+
+            // 3. Apply coordinates if all are present
+            if (hasCoordinates) {
+                sceneContext.camera.position.set(state.cx!, state.cy!, state.cz!);
+                sceneContext.camera.quaternion.set(state.qx!, state.qy!, state.qz!, state.qw!).normalize();
+                sceneContext.camera.updateMatrixWorld();
+                sceneContext.controls.getEuler().setFromQuaternion(sceneContext.camera.quaternion);
+            }
+            
+            // Re-sync URL immediately if we're now anchored to ensure any rounding is captured
+            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId());
+            isApplyingUrlState = false;
+        };
+        // Restore camera state if present in URL
+        const cameraState = getCameraStateFromUrl();
+        if (cameraState) {
+            console.info('[session] restoring camera state from URL', cameraState);
+            applyState(cameraState);
+        }
+
+        // Setup URL sync
+        const debouncedUpdateUrl = debounce(() => {
+            if (isApplyingUrlState) return;
+            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId());
+        }, 500);
+        sceneContext.controls.setOnChange(debouncedUpdateUrl);
+        compositor.setOnSelectionChanged(() => {
+            debouncedUpdateUrl();
+        });
+
+        window.addEventListener('hashchange', onHashChange);
+
         const dispose = () => {
             console.group('[session] dispose');
+            window.removeEventListener('hashchange', onHashChange);
             try {
                 console.info('[compositor] disposing');
                 compositor.dispose();
@@ -132,6 +238,11 @@ export async function startAppSession(): Promise<AppSession> {
                 console.error('[scene] dispose failed', error);
             }
             console.groupEnd();
+
+            const badge = document.getElementById('app-status-badge');
+            if (badge) {
+                badge.remove();
+            }
         };
 
         return { compositor, sceneContext, dispose };

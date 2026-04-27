@@ -3,10 +3,16 @@ import * as THREE from 'three';
 import type { SceneContext } from './scene';
 import type { LoadedMirisAsset, MirisAdapter } from './mirisAdapter';
 import type { SceneDefinition } from './scene/sceneDefinition';
-import type { SceneNodeDefinition, DepthBand } from './scene/sceneTypes';
+import type { SceneNodeDefinition, DepthBand, SceneNodePriority } from './scene/sceneTypes';
+
+import { getMirisConfig } from './config/mirisEnv';
+
+interface ResolvedSceneNodeDefinition extends SceneNodeDefinition {
+    priority: SceneNodePriority;
+}
 
 interface RuntimeAsset {
-    config: SceneNodeDefinition;
+    config: ResolvedSceneNodeDefinition;
     loaded: LoadedMirisAsset;
     priorityScore: number;
     streamLoaded: boolean;
@@ -20,6 +26,7 @@ export class Compositor {
     private readonly mirisAdapter: MirisAdapter;
     private mirisSceneLoaded = false;
     private readonly pendingStreamLoads = new Set<string>();
+    private readonly streamQueue: string[] = [];
     private allStreamsLoadedOnce = false;
     private readyResolve?: () => void;
     readonly ready: Promise<void>;
@@ -27,6 +34,7 @@ export class Compositor {
     private hoveredAssetId: string | null = null;
     private selectedAssetId: string | null = null;
     private anchorAssetId: string | null = null;
+    private onSelectionChanged: ((id: string | null) => void) | null = null;
     private lastClickTime = 0;
     private static readonly DOUBLE_CLICK_THRESHOLD = 300;
     private readonly raycaster = new THREE.Raycaster();
@@ -56,23 +64,34 @@ export class Compositor {
                     this.readyResolve();
                     this.readyResolve = undefined;
                 }
-            }, 8000);
+            }, 1000);
         });
 
         this.attachMirisSceneListeners();
         this.addEventListeners();
+        this.createFocusUI();
+        this.createCameraDebugUI();
     }
+
+    private readonly onPointerLockChange = (): void => {
+        const canvas = this.sceneContext.mount.querySelector('canvas');
+        this.isPointerLocked = document.pointerLockElement === canvas;
+    };
 
     private addEventListeners(): void {
         window.addEventListener('mousemove', this.onMouseMove);
         window.addEventListener('mousedown', this.onMouseDown);
         window.addEventListener('mouseup', this.onMouseUp);
         window.addEventListener('keydown', this.onKeyDown);
-        
-        document.addEventListener('pointerlockchange', () => {
-            const canvas = this.sceneContext.mount.querySelector('canvas');
-            this.isPointerLocked = document.pointerLockElement === canvas;
-        });
+        document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    }
+
+    private removeEventListeners(): void {
+        window.removeEventListener('mousemove', this.onMouseMove);
+        window.removeEventListener('mousedown', this.onMouseDown);
+        window.removeEventListener('mouseup', this.onMouseUp);
+        window.removeEventListener('keydown', this.onKeyDown);
+        document.removeEventListener('pointerlockchange', this.onPointerLockChange);
     }
 
     private readonly onMouseMove = (event: MouseEvent): void => {
@@ -152,7 +171,7 @@ export class Compositor {
                 this.selectAsset(this.hoveredAssetId, false, false);
             }
         } else {
-            // Clicked empty space: clear selection
+            // Clicked empty space: clear the selection
             // ONLY if we were not already empty. This avoids redundant calls.
             if (this.selectedAssetId !== null) {
                 console.log('[compositor] clicked empty space');
@@ -243,14 +262,16 @@ export class Compositor {
         }
     }
 
-    public selectAsset(id: string | null, smooth = false, requestLock = false): void {
+    public selectAsset(id: string | null, smooth = false, requestLock = false, forceAnchor = false): void {
         const isDoubleClick = smooth && !requestLock; // Our convention from onMouseUp
         const isLinkClick = smooth && requestLock;    // Our convention from UI links
         
+        const selectionChanged = id !== this.selectedAssetId;
+
         // Double-click or link click on different asset triggers anchoring
-        const shouldUpdateAnchor = isDoubleClick || (isLinkClick && id !== this.anchorAssetId);
+        const shouldUpdateAnchor = forceAnchor || isDoubleClick || (isLinkClick && id !== this.anchorAssetId);
         const shouldFocus = isDoubleClick || isLinkClick;
-        console.log(`[compositor] isDoubleClick: ${isDoubleClick}, isLinkClick: ${isLinkClick}, shouldUpdateAnchor: ${shouldUpdateAnchor}, shouldFocus: ${shouldFocus}`);
+        console.log(`[compositor] id: ${id}, forceAnchor: ${forceAnchor}, isDoubleClick: ${isDoubleClick}, isLinkClick: ${isLinkClick}, shouldUpdateAnchor: ${shouldUpdateAnchor}, shouldFocus: ${shouldFocus}`);
 
         if (this.selectedAssetId && this.selectedAssetId !== id) {
             const prev = this.runtimeAssets.get(this.selectedAssetId);
@@ -272,6 +293,7 @@ export class Compositor {
         const isActuallyChangingAnchor = shouldUpdateAnchor || (id !== this.selectedAssetId && isCurrentlyAnchored && !this.anchorAssetId);
 
         if (isActuallyChangingAnchor && oldAnchorId) {
+            console.log(`[compositor] decoupling anchor: oldAnchorId=${oldAnchorId}, newId=${id}`);
             this.decoupleAnchor();
             // restore if we just cleared it but intended to set a new one
             this.anchorAssetId = shouldUpdateAnchor ? id : null;
@@ -279,6 +301,10 @@ export class Compositor {
 
         this.selectedAssetId = id;
         console.log(`[compositor] selectAsset(${id}, smooth=${smooth}, lock=${requestLock}) - anchored=${isCurrentlyAnchored}, changingAnchor=${isActuallyChangingAnchor}, anchorAsset=${this.anchorAssetId}`);
+
+        if (selectionChanged && this.onSelectionChanged) {
+            this.onSelectionChanged(id);
+        }
 
         if (this.selectedAssetId) {
             const current = this.runtimeAssets.get(this.selectedAssetId);
@@ -320,6 +346,8 @@ export class Compositor {
                     const parentWorldQuat = new THREE.Quaternion();
                     anchor.getWorldQuaternion(parentWorldQuat);
                     camera.quaternion.copy(parentWorldQuat.invert().multiply(worldQuat));
+                    
+                    this.anchorAssetId = id; // Ensure this is set
                 }
 
                 // Smooth pan look at the selected asset (can be different from anchor)
@@ -330,15 +358,28 @@ export class Compositor {
                 }
 
                 const container = document.getElementById('focus-info-panel');
-                if (container) container.style.display = 'block';
+                if (container) {
+                    container.style.display = 'block';
+                    const width = container.offsetWidth || 320;
+                    this.sceneContext.controls.setSideOffset(width / 2);
+                }
             }
             this.updateFocusUI(id);
         } else {
             this.anchorAssetId = null;
             this.decoupleAnchor();
             this.sceneContext.controls.setFocusTarget(null, false, false);
+            this.sceneContext.controls.setSideOffset(0);
             this.updateFocusUI(null);
         }
+    }
+
+    public getSelectedAssetId(): string | null {
+        return this.selectedAssetId;
+    }
+
+    public setOnSelectionChanged(callback: ((id: string | null) => void) | null): void {
+        this.onSelectionChanged = callback;
     }
 
     private decoupleAnchor(): void {
@@ -390,7 +431,7 @@ export class Compositor {
     }
 
     private attachMirisSceneListeners(): void {
-        const mirisScene = this.sceneContext.mirisScene;
+        const mirisScene = this.sceneContext.scene;
 
         if (mirisScene && typeof mirisScene.addEventListener === 'function') {
             mirisScene.addEventListener('sceneloaded', (event: unknown) => {
@@ -417,6 +458,49 @@ export class Compositor {
         }
         this.runtimeAssets.clear();
 
+        // Resolve viewer keys: Environment keys, then Scene definition keys
+        const config = getMirisConfig();
+        const resolvedKeys: Record<string, string> = {};
+        if (config.viewerKeys) {
+            Object.assign(resolvedKeys, config.viewerKeys);
+        }
+        if (sceneDef.viewerKeys) {
+            for (const group of sceneDef.viewerKeys) {
+                Object.assign(resolvedKeys, group);
+            }
+        }
+
+        // Helper to resolve a key from literal or group
+        const resolveKey = (key: string | undefined): string | undefined => {
+            if (!key) return undefined;
+            // If the key exists in our map, use the mapped value
+            if (resolvedKeys[key]) return resolvedKeys[key];
+            // Otherwise, it might be a literal key
+            return key;
+        };
+
+        // Determine scene-level viewer key (inherited by nodes)
+        const sceneViewerKey = resolveKey(sceneDef.viewerKey) || config.viewerKey;
+
+        console.info('[compositor] resolving keys', {
+            sceneViewerKey: sceneViewerKey ? (sceneViewerKey.length > 8 ? sceneViewerKey.substring(0, 8) + '...' : sceneViewerKey) : 'none',
+            resolvedKeysCount: Object.keys(resolvedKeys).length
+        });
+
+        // Set initial camera if provided
+        if (sceneDef.initialCamera) {
+            const cam = sceneDef.initialCamera;
+            this.sceneContext.camera.position.set(cam.position[0], cam.position[1], cam.position[2]);
+            this.sceneContext.camera.rotation.set(cam.rotation[0], cam.rotation[1], cam.rotation[2]);
+            if (cam.zoom !== undefined) {
+                this.sceneContext.camera.zoom = cam.zoom;
+            }
+            this.sceneContext.camera.updateProjectionMatrix();
+            // Sync internal euler state of controls
+            // @ts-ignore
+            this.sceneContext.controls.euler.setFromQuaternion(this.sceneContext.camera.quaternion);
+        }
+
         // Load all nodes
         const nodeById = new Map<string, SceneNodeDefinition>();
         for (const node of sceneDef.nodes) {
@@ -428,30 +512,58 @@ export class Compositor {
             const [rx, ry, rz] = node.transform.rotation;
             const [sx, sy, sz] = node.transform.scale;
 
-            const loaded = await this.mirisAdapter.loadStream({
+            // Resolve inherited properties: priority, debugColor, and viewerKey
+            let resolvedPriority = node.priority;
+            let resolvedDebugColor = node.debugColor;
+            let resolvedViewerKey = resolveKey(node.viewerKey);
+
+            let currentParentId = node.parentId;
+            while ((!resolvedPriority || resolvedDebugColor === undefined || !resolvedViewerKey) && currentParentId) {
+                const parentNode = nodeById.get(currentParentId);
+                if (!parentNode) break;
+
+                if (!resolvedPriority && parentNode.priority) {
+                    resolvedPriority = parentNode.priority;
+                }
+                if (resolvedDebugColor === undefined && parentNode.debugColor !== undefined) {
+                    resolvedDebugColor = parentNode.debugColor;
+                }
+                if (!resolvedViewerKey && parentNode.viewerKey) {
+                    resolvedViewerKey = resolveKey(parentNode.viewerKey);
+                }
+                currentParentId = parentNode.parentId;
+            }
+
+            // Finally fallback to scene-level key if still not resolved
+            if (!resolvedViewerKey) {
+                resolvedViewerKey = sceneViewerKey;
+            }
+
+            const loaded = this.mirisAdapter.createPlaceholder({
                 id: node.id,
                 streamId: node.streamId,
                 position: new THREE.Vector3(px, py, pz),
                 rotation: new THREE.Euler(rx, ry, rz),
                 scale: new THREE.Vector3(sx, sy, sz),
-                debugColor: node.debugColor,
+                viewerKey: resolvedViewerKey,
+                debugColor: resolvedDebugColor,
             });
 
             this.runtimeAssets.set(node.id, {
-                config: node,
+                config: {
+                    ...node,
+                    priority: (resolvedPriority || { importance: 0.5, depthBand: 'midground' }) as SceneNodePriority,
+                    debugColor: resolvedDebugColor,
+                    viewerKey: resolvedViewerKey, // Store the fully resolved key
+                },
                 loaded,
                 priorityScore: 0,
                 streamLoaded: false,
             });
 
-            if (loaded.stream) {
+            if (node.streamId) {
                 this.pendingStreamLoads.add(node.id);
-                const stream = loaded.stream;
-                if (stream.isLoaded) {
-                    console.info(`[compositor] stream for ${node.id} already loaded`);
-                    this.runtimeAssets.get(node.id)!.streamLoaded = true;
-                    this.pendingStreamLoads.delete(node.id);
-                }
+                this.streamQueue.push(node.id);
             }
         }
 
@@ -476,19 +588,107 @@ export class Compositor {
             }
         }
 
-        // Attach per-stream loaded handlers
-        for (const [id, runtimeAsset] of this.runtimeAssets) {
-            const { loaded } = runtimeAsset;
-            const stream = loaded.stream;
+        this.updatePriorities();
+        await this.processStreamQueue();
+    }
 
-            if (stream && typeof stream.addEventListener === 'function') {
-                stream.addEventListener('streamloaded', (event: unknown) => {
-                    console.info(`[compositor/miris] streamloaded for ${id}`, event);
+    private isProcessingQueue = false;
+
+    private async processStreamQueue(): Promise<void> {
+        if (this.streamQueue.length === 0 || this.isProcessingQueue) return;
+
+        this.isProcessingQueue = true;
+        try {
+            console.info(`[compositor] processing stream queue (${this.streamQueue.length} items).`);
+
+        // Sort queue by priority score (highest first)
+        this.streamQueue.sort((a, b) => {
+            const assetA = this.runtimeAssets.get(a);
+            const assetB = this.runtimeAssets.get(b);
+            if (!assetA || !assetB) return 0;
+            return assetB.priorityScore - assetA.priorityScore;
+        });
+
+        // Helper to check if a node's streamed ancestors are loaded
+        const canAttachStream = (id: string): boolean => {
+            const asset = this.runtimeAssets.get(id);
+            if (!asset) return true;
+
+            let parentId = asset.config.parentId;
+            while (parentId) {
+                const parentAsset = this.runtimeAssets.get(parentId);
+                if (!parentAsset) break;
+
+                // If the parent is supposed to be a stream but isn't loaded yet,
+                // we should wait to attach this child stream to avoid reparenting issues.
+                if (parentAsset.config.streamId && !parentAsset.streamLoaded) {
+                    return false;
+                }
+                parentId = parentAsset.config.parentId;
+            }
+            return true;
+        };
+
+        // Load eligible nodes
+        const remaining = [...this.streamQueue];
+        for (const id of remaining) {
+            if (!canAttachStream(id)) {
+                // Skip for now, will be processed in a future updatePriorities/processStreamQueue tick
+                continue;
+            }
+
+            const runtimeAsset = this.runtimeAssets.get(id);
+            if (!runtimeAsset) continue;
+
+            const node = runtimeAsset.config;
+            const [px, py, pz] = node.transform.position;
+            const [rx, ry, rz] = node.transform.rotation;
+            const [sx, sy, sz] = node.transform.scale;
+
+            // Determine viewer key again
+            const viewerKey = runtimeAsset.config.viewerKey;
+
+            console.info(`[compositor] loading stream ${id} (priority: ${runtimeAsset.priorityScore.toFixed(3)})`);
+
+            await this.mirisAdapter.attachStream(runtimeAsset.loaded, {
+                id: node.id,
+                streamId: node.streamId,
+                position: new THREE.Vector3(px, py, pz),
+                rotation: new THREE.Euler(rx, ry, rz),
+                scale: new THREE.Vector3(sx, sy, sz),
+                viewerKey,
+                debugColor: runtimeAsset.config.debugColor,
+            });
+
+            const stream = runtimeAsset.loaded.stream;
+            if (stream) {
+                if (stream.isLoaded) {
                     runtimeAsset.streamLoaded = true;
                     this.pendingStreamLoads.delete(id);
-                    this.checkAllMirisReady();
-                });
+                    // If it was already loaded, it might unlock children immediately
+                    await this.processStreamQueue();
+                } else if (typeof stream.addEventListener === 'function') {
+                    stream.addEventListener('streamloaded', () => {
+                        runtimeAsset.streamLoaded = true;
+                        this.pendingStreamLoads.delete(id);
+                        this.checkAllMirisReady();
+                        // Re-trigger queue processing when an ancestor finishes loading
+                        this.processStreamQueue();
+                    });
+                }
+            } else {
+                // If attachStream failed or didn't produce a stream, we should probably mark it as "loaded" so we don't wait forever
+                this.pendingStreamLoads.delete(id);
             }
+
+            // Remove from queue
+            const index = this.streamQueue.indexOf(id);
+            if (index > -1) this.streamQueue.splice(index, 1);
+        }
+
+        this.checkAllMirisReady();
+        } finally {
+            this.isProcessingQueue = false;
         }
     }
 
@@ -512,6 +712,17 @@ export class Compositor {
 
     dispose(): void {
         this.stop();
+        this.removeEventListeners();
+
+        const focusPanel = document.getElementById('focus-info-panel');
+        if (focusPanel) {
+            focusPanel.remove();
+        }
+
+        const cameraPanel = document.getElementById('camera-debug-panel');
+        if (cameraPanel) {
+            cameraPanel.remove();
+        }
 
         for (const asset of this.runtimeAssets.values()) {
             this.mirisAdapter.unload(asset.loaded);
@@ -532,7 +743,7 @@ export class Compositor {
         // The anchor is only cleared explicitly via selection reset / Escape / Backspace.
 
         const now = performance.now();
-        // Hover fade out if mouse stationary
+        // Hover fades out if mouse stationary
         if (now - this.lastMouseMoveTime > this.HOVER_FADE_DELAY) {
             this.setHovered(null);
         }
@@ -546,6 +757,8 @@ export class Compositor {
         if (this.selectedAssetId) {
             this.updateLiveUI(this.selectedAssetId);
         }
+
+        this.updateCameraUI();
 
         this.sceneContext.renderer.render(
             this.sceneContext.scene,
@@ -643,6 +856,7 @@ export class Compositor {
         if (!id) {
             container.style.display = 'none';
             container.innerHTML = ''; // Clear content
+            this.sceneContext.controls.setSideOffset(0);
             return;
         }
 
@@ -732,7 +946,7 @@ export class Compositor {
             el.addEventListener('click', (e) => {
                 const targetId = (e.currentTarget as HTMLElement).getAttribute('data-id-link');
                 console.log(`[compositor] clicked link to ${targetId}`);
-                if (targetId) this.selectAsset(targetId, true, false); // Use smooth easing for dialog clicks, but no pointer lock
+                if (targetId) this.selectAsset(targetId, true, false); // Use smooth easing for dialog clicks
             });
             el.addEventListener('mouseenter', (e) => {
                 const targetId = (e.currentTarget as HTMLElement).getAttribute('data-id-link');
@@ -814,7 +1028,7 @@ export class Compositor {
             top: '20px',
             right: '20px',
             width: '320px',
-            bottom: '20px',
+            maxHeight: 'calc(100% - 40px)',
             background: 'rgba(15, 23, 42, 0.9)',
             backdropFilter: 'blur(8px)',
             border: '1px solid #334155',
@@ -822,8 +1036,81 @@ export class Compositor {
             overflowY: 'auto',
             zIndex: '1000',
             display: 'none',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+            boxSizing: 'border-box'
         });
         document.body.appendChild(panel);
+    }
+
+    private createCameraDebugUI(): void {
+        const panel = document.createElement('div');
+        panel.id = 'camera-debug-panel';
+        Object.assign(panel.style, {
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            width: '320px',
+            background: 'rgba(15, 23, 42, 0.9)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid #334155',
+            borderRadius: '12px',
+            padding: '20px',
+            color: '#f8fafc',
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '0.85rem',
+            zIndex: '1000',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
+            pointerEvents: 'none',
+            boxSizing: 'border-box'
+        });
+        document.body.appendChild(panel);
+    }
+
+    private updateCameraUI(): void {
+        const panel = document.getElementById('camera-debug-panel');
+        if (!panel) return;
+
+        const info = this.sceneContext.controls.getDebugInfo();
+        const { worldPosition: wp, worldRotation: wr, zoom, frustum, isAnchored, anchorId, relativePosition: rp, relativeRotation: rr } = info;
+
+        panel.innerHTML = `
+            <div style="font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; font-size: 0.7rem;">Camera Debug</div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 8px 12px;">
+                <div style="color: #94a3b8;">World Pos</div>
+                <div style="font-family: monospace;">[${wp.x.toFixed(2)}, ${wp.y.toFixed(2)}, ${wp.z.toFixed(2)}]</div>
+                
+                <div style="color: #94a3b8;">World Rot</div>
+                <div style="font-family: monospace;">[${THREE.MathUtils.radToDeg(wr.x).toFixed(1)}°, ${THREE.MathUtils.radToDeg(wr.y).toFixed(1)}°, ${THREE.MathUtils.radToDeg(wr.z).toFixed(1)}°]</div>
+                
+                <div style="color: #94a3b8;">Zoom / FOV</div>
+                <div style="font-family: monospace;">${zoom.toFixed(2)} / ${frustum.fov.toFixed(1)}°</div>
+                
+                <div style="color: #94a3b8;">Frustum</div>
+                <div style="font-family: monospace;">N: ${frustum.near} F: ${frustum.far}</div>
+            </div>
+
+            ${isAnchored ? `
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155;">
+                    <div style="color: #3b82f6; font-weight: 600; margin-bottom: 8px;">Anchored to: ${anchorId}</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 8px 12px;">
+                        <div style="color: #94a3b8;">Local Pos</div>
+                        <div style="font-family: monospace;">[${rp?.x.toFixed(3)}, ${rp?.y.toFixed(3)}, ${rp?.z.toFixed(3)}]</div>
+                        <div style="color: #94a3b8;">Local Rot</div>
+                        <div style="font-family: monospace;">[${THREE.MathUtils.radToDeg(rr?.x || 0).toFixed(1)}°, ${THREE.MathUtils.radToDeg(rr?.y || 0).toFixed(1)}°, ${THREE.MathUtils.radToDeg(rr?.z || 0).toFixed(1)}°]</div>
+                    </div>
+                </div>
+            ` : ''}
+        `;
+
+        // Ensure Selected Asset panel doesn't overlap if screen is too small
+        const assetPanel = document.getElementById('focus-info-panel');
+        if (assetPanel && assetPanel.style.display !== 'none') {
+            const cameraHeight = panel.offsetHeight || 150;
+            const gap = 20; // Minimum margin between panels
+            assetPanel.style.maxHeight = `calc(100% - ${cameraHeight + 20 + 20 + gap}px)`;
+        } else if (assetPanel) {
+            assetPanel.style.maxHeight = 'calc(100% - 40px)';
+        }
     }
 }

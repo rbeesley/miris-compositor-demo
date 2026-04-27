@@ -1,13 +1,13 @@
 ﻿import * as THREE from 'three';
-import { MirisStream } from '@miris-inc/three';
-import { getMirisConfig } from './config/mirisEnv';
+import { MirisScene, MirisStream } from '@miris-inc/three';
 
 export interface MirisLoadRequest {
     id: string;
-    streamId: string;
+    streamId?: string;
     position: THREE.Vector3;
     rotation: THREE.Euler;
     scale: THREE.Vector3;
+    viewerKey?: string;
     debugColor?: number;
 }
 
@@ -30,33 +30,25 @@ export class MirisAdapter {
     private static readonly LABEL_CANVAS_HEIGHT = 96;
     private static readonly OUTLINE_PADDING = 0.02;
 
-    private readonly scene: THREE.Scene;
+    private readonly scene: MirisScene;
 
-    constructor(scene: THREE.Scene) {
+    constructor(scene: MirisScene) {
         this.scene = scene;
     }
 
-    async loadStream(request: MirisLoadRequest): Promise<LoadedMirisAsset> {
-        const config = getMirisConfig();
+    public createPlaceholder(request: MirisLoadRequest): LoadedMirisAsset {
         const streamUuid = request.streamId;
 
-        if (!streamUuid || !config.viewerKey) {
+        if (!streamUuid) {
             const root = this.createRoot(request);
-            const placeholder = this.createFallbackVisual(
-                request.id,
-                request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
-            );
+            const placeholder = new THREE.Object3D(); // Invisible placeholder for groups
             root.add(placeholder);
 
             const outline = this.createOutline();
             root.add(outline);
             outline.visible = false;
 
-            console.warn(
-                !streamUuid
-                    ? `No asset UUID configured for ${request.id}; using fallback.`
-                    : `Miris viewer key missing; using fallback for ${request.id}`,
-            );
+            console.info(`Creating empty group node for ${request.id}`);
 
             return {
                 id: request.id,
@@ -64,30 +56,60 @@ export class MirisAdapter {
                 placeholder,
                 outline,
                 stream: undefined,
-                usingFallback: true,
+                usingFallback: false, // It's a group, not a fallback
             };
         }
 
+        const root = this.createRoot(request);
+        const placeholder = this.createFallbackVisual(
+            request.id,
+            request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
+        );
+        root.add(placeholder);
+
+        const outline = this.createOutline();
+        root.add(outline);
+        outline.visible = false;
+
+        return {
+            id: request.id,
+            root,
+            placeholder,
+            outline,
+            stream: undefined,
+            usingFallback: false,
+        };
+    }
+
+    public async attachStream(asset: LoadedMirisAsset, request: MirisLoadRequest): Promise<void> {
+        const streamUuid = request.streamId;
+        const viewerKey = request.viewerKey;
+
+        if (!streamUuid) {
+            return;
+        }
+
         try {
-            // Use MirisStream directly as the root to support viewerKey inheritance from MirisScene
-            const stream = new MirisStream({
+            // Use MirisStream directly as a child of the root group
+            // This ensures the root group (which children attach to) never changes identity
+            const streamOptions: any = {
                 uuid: streamUuid,
-            }) as MirisStream;
+            };
 
-            stream.name = `miris-asset:${request.id}`;
-            stream.position.copy(request.position);
-            stream.rotation.copy(request.rotation);
-            stream.scale.copy(request.scale);
+            if (viewerKey) {
+                streamOptions.viewerKey = viewerKey;
+            }
 
-            const placeholder = this.createFallbackVisual(
-                request.id,
-                request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
-            );
-            stream.add(placeholder);
+            const stream = new MirisStream(streamOptions) as MirisStream;
 
-            const outline = this.createOutline();
-            stream.add(outline);
-            outline.visible = false;
+            stream.name = `miris-stream:${request.id}`;
+            // Identity transform since it's a child of the root group that already has the transform
+            stream.position.set(0, 0, 0);
+            stream.rotation.set(0, 0, 0);
+            stream.scale.set(1, 1, 1);
+
+            asset.root.add(stream);
+            asset.stream = stream;
 
             let metadata: any = undefined;
             if (typeof stream.fetchAssets === 'function') {
@@ -100,12 +122,12 @@ export class MirisAdapter {
 
             console.info(`Creating Miris stream for ${request.id}`, {
                 streamId: request.streamId,
-                hasViewerKey: Boolean(config.viewerKey),
+                hasViewerKey: Boolean(viewerKey),
             });
 
             if (typeof stream.addEventListener === 'function') {
                 stream.addEventListener('streamloaded', (event: any) => {
-                    placeholder.visible = false;
+                    asset.placeholder.visible = false;
                     console.info(`[Miris ${request.id}] streamloaded`, event);
                 });
 
@@ -115,43 +137,21 @@ export class MirisAdapter {
 
                 // Check if already loaded
                 if (stream.isLoaded) {
-                    placeholder.visible = false;
+                    asset.placeholder.visible = false;
                     console.info(`[Miris ${request.id}] already loaded`);
                 }
             }
 
-            console.info(`Miris stream attached for ${request.id}`);
+            // Define metadata getter on the asset if it doesn't exist
+            Object.defineProperty(asset, 'metadata', {
+                get() { return metadata; },
+                configurable: true
+            });
 
-            return {
-                id: request.id,
-                root: stream,
-                placeholder,
-                outline,
-                stream,
-                usingFallback: false,
-                get metadata() { return metadata; }
-            };
+            console.info(`Miris stream attached for ${request.id}`);
         } catch (error) {
             console.warn(`Failed to load Miris stream for ${request.id}:`, error);
-            const root = this.createRoot(request);
-            const placeholder = this.createFallbackVisual(
-                request.id,
-                request.debugColor ?? MirisAdapter.DEFAULT_DEBUG_COLOR,
-            );
-            root.add(placeholder);
-
-            const outline = this.createOutline();
-            root.add(outline);
-            outline.visible = false;
-
-            return {
-                id: request.id,
-                root,
-                placeholder,
-                outline,
-                stream: undefined,
-                usingFallback: true,
-            };
+            asset.usingFallback = true;
         }
     }
 
@@ -186,6 +186,8 @@ export class MirisAdapter {
             ),
             new THREE.MeshStandardMaterial({
                 color,
+                transparent: true,
+                opacity: 0.1,
                 metalness: 0.1,
                 roughness: 0.8,
             }),
@@ -262,7 +264,7 @@ export class MirisAdapter {
     }
 
     private createOutline(): THREE.LineSegments {
-        // Outline based on a box. We use 1.0 size as base (same as fallback box)
+        // Outline based on a box. We use 1.0 size as base (same as fallback box),
         // or we could use bounding boxes if streams provide them.
         // For now, let's use a 1.1x box for the aura/selection.
         const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1 + MirisAdapter.OUTLINE_PADDING, 1 + MirisAdapter.OUTLINE_PADDING, 1 + MirisAdapter.OUTLINE_PADDING));
@@ -286,7 +288,7 @@ export class MirisAdapter {
             case 'hover':
                 outline.visible = true;
                 material.opacity = 0.5;
-                material.color.set(0x3b82f6); // Blue-ish aura
+                material.color.set(0x3b82f6); // Blueish aura
                 // Partial wireframe effect is harder with LineSegments directly,
                 // but we can adjust opacity or use a custom shader if needed.
                 // For now, let's keep it simple with opacity.
