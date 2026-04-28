@@ -1,12 +1,16 @@
-﻿export interface MirisConfig {
+﻿// src/config/mirisEnv.ts
+
+export interface MirisConfig {
+    defaultScene?: string; // ID of the default scene to load from VITE_DEFAULT_SCENE
     viewerKey?: string;
     viewerKeys?: Record<string, string>; // Parsed from VITE_MIRIS_VIEWER_KEYS
 }
 
 export function getMirisConfig(): MirisConfig {
+    const defaultScene = import.meta.env.VITE_DEFAULT_SCENE?.trim() || undefined;
     const defaultKey = import.meta.env.VITE_MIRIS_VIEWER_KEY?.trim() || undefined;
     const keysRaw = import.meta.env.VITE_MIRIS_VIEWER_KEYS?.trim() || '';
-    
+
     let viewerKeys: Record<string, string> | undefined;
     if (keysRaw) {
         try {
@@ -27,6 +31,7 @@ export function getMirisConfig(): MirisConfig {
     }
 
     return {
+        defaultScene,
         viewerKey: defaultKey,
         viewerKeys,
     };

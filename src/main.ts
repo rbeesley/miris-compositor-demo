@@ -1,3 +1,5 @@
+// src/main.ts
+
 import './style.css';
 import { startAppSession, type AppSession } from './appSession';
 

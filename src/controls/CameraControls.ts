@@ -1,4 +1,6 @@
-﻿import * as THREE from 'three';
+﻿// src/controls/CameraControls.ts
+
+import * as THREE from 'three';
 
 export class CameraControls {
     private readonly camera: THREE.PerspectiveCamera;

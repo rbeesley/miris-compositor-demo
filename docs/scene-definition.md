@@ -1,6 +1,6 @@
 ﻿# Scene Definition
 
-The Miris Compositor Demo uses a hierarchical, JSON-like scene definition format to configure how assets are streamed and positioned.
+The Miris Compositor Demo uses a hierarchical JSON format to configure how assets are streamed and positioned. Scene files stored in the `public/scenes/` directory will be available in the Load Scene menu.
 
 ## Scene Structure
 
@@ -36,35 +36,31 @@ If a `viewerKey` (at any level) matches a group name defined in the `viewerKeys`
 
 You can define a map of viewer keys at the scene level or in the environment:
 
-```typescript
-viewerKeys: [
-  { 'external-assets-group': '4YIGMPUj5...' },
-  { 'private-collection-group': '6XJH...' }
-]
+```json
+  "viewerKeys": [
+    { "external-assets-group": "4YIGMPUj5..." },
+    { "private-collection-group": "6XJH..." }
+  ],
 ```
 
 These groups can then be referenced by individual nodes or the scene:
 
-```typescript
-// Scene definition
-export const myScene: SceneDefinition = {
-  viewerKey: 'external-assets-group', // Scene-wide default group
-  // ...
-  nodes: [
+```json
+  "id": "my-scene",
+  "viewerKey": "external-assets-group",
+  "nodes": [
     {
-      id: 'node-a',
-      // Inherits 'external-assets-group' from scene
+      "id": "node-a"
     },
     {
-      id: 'node-b',
-      viewerKey: 'private-collection-group', // Overrides with a different group
+      "id": "node-b",
+      "viewerKey": "private-collection-group"
     },
     {
-       id: 'node-c',
-       viewerKey: '4YIGMPUj5...', // Literal key
+       "id": "node-c",
+       "viewerKey": "4YIGMPUj5..."
     }
   ]
-}
 ```
 
 ### SDK Support Note
@@ -78,6 +74,7 @@ Each `SceneNodeDefinition` represents a single Miris asset or a logical grouping
 
 ```typescript
 interface SceneNodeDefinition {
+  version: string;     // Version of the node definition schema  
   id: string;          // Unique identifier for the node
   label: string;       // Human-readable name
   streamId?: string;   // Miris Stream UUID (optional if viewerKey is used)
@@ -113,46 +110,48 @@ The compositor supports **relative transforms**. If a node has a `parentId`, its
 
 ## Example Scene
 
-```typescript
-export const myScene: SceneDefinition = {
-  id: 'my-scene',
-  label: 'My Demo Scene',
-  rootNodeIds: ['main-environment'],
-  nodes: [
+```json
+{
+  "version": "1.0",
+  "id": "my-scene",
+  "label": "My Demo Scene",
+  "viewerKey": "environment-viewer-key",
+  "rootNodeIds": ["main-environment"],
+  "nodes": [
     {
-      id: 'main-environment',
-      label: 'Main Environment',
-      streamId: '...', // Miris Stream UUID
-      transform: {
-        position: [0, 0, 0],
-        rotation: [0, 0, 0],
-        scale: [1, 1, 1],
+      "id": "main-environment",
+      "label": "Main Environment",
+      "streamId": "...",
+      "transform": {
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": [1, 1, 1]
       },
-      priority: {
-        importance: 1.0,
-        depthBand: 'background',
-        sceneWeight: 1.0,
-      },
+      "priority": {
+        "importance": 1.0,
+        "depthBand": "background",
+        "sceneWeight": 1.0
+      }
     },
     {
-      id: 'floating-asset',
-      label: 'Floating Asset',
-      streamId: '...',
-      parentId: 'main-environment',
-      transform: {
-        position: [0, 2, 0], // 2 meters above parent
-        rotation: [0, 0, 0],
-        scale: [0.5, 0.5, 0.5],
+      "id": "floating-asset",
+      "label": "Floating Asset",
+      "streamId": "...",
+      "parentId": "main-environment",
+      "transform": {
+        "position": [0, 2, 0],
+        "rotation": [0, 0, 0],
+        "scale": [0.5, 0.5, 0.5]
       },
-      animation: {
-        rotate: true,
-        bounce: true,
+      "animation": {
+        "rotate": true,
+        "bounce": true
       },
-      priority: {
-        importance: 0.8,
-        depthBand: 'midground',
-      },
-    },
-  ],
-};
+      "priority": {
+        "importance": 0.8,
+        "depthBand": "midground"
+      }
+    }
+  ]
+}
 ```

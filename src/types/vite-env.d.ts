@@ -1,4 +1,6 @@
-﻿/// <reference types="vite/client" />
+﻿// src/types/vite-env.d.ts
+
+/// <reference types="vite/client" />
 
 interface ImportMetaEnv {
   readonly VITE_MIRIS_VIEWER_KEY: string;

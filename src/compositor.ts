@@ -1,4 +1,5 @@
-﻿// compositor.ts
+﻿// src/compositor.ts
+
 import * as THREE from 'three';
 import type { SceneContext } from './scene';
 import type { LoadedMirisAsset, MirisAdapter } from './mirisAdapter';
@@ -57,14 +58,6 @@ export class Compositor {
 
         this.ready = new Promise<void>((resolve) => {
             this.readyResolve = resolve;
-            // Robustness: also resolve after a timeout if SDK events are missed
-            setTimeout(() => {
-                if (this.readyResolve) {
-                    console.warn('[compositor] ready timed out (missed SDK events), proceeding');
-                    this.readyResolve();
-                    this.readyResolve = undefined;
-                }
-            }, 1000);
         });
 
         this.attachMirisSceneListeners();

@@ -1,13 +1,14 @@
-﻿import { createSceneContext } from './scene';
+﻿// src/appSession.ts
+
+import { createSceneContext } from './scene';
 import { MirisAdapter } from './mirisAdapter';
 import { Compositor } from './compositor';
 import { getMirisConfig } from './config/mirisEnv';
 import type { SceneContext } from './scene';
-// import { tokyoMarketScene } from './scene/scenes/tokyoMarketScene';
-import { tokyoMarketScene } from './scene/scenes/tokyoMarketSceneMirisPlayer';
-// import { tokyoMarketScene } from './scene/scenes/tokyoMarketSceneMixedViewerKeys';
 import { getCameraStateFromUrl, updateUrlFromCamera, debounce } from './utils/urlState';
 import type { CameraState } from './utils/urlState';
+import { loadSceneFromBuiltinId, loadSceneFromFile, createBlankScene } from './scene/sceneLoader';
+import type { SceneDefinition } from './scene/sceneDefinition';
 
 export type AppSession = {
     compositor: Compositor;
@@ -36,9 +37,11 @@ function addStatusBadge(message: string): void {
     setTimeout(() => {
         const badge = document.getElementById('app-status-badge');
         if (badge) {
-            badge.remove();
+            badge.style.opacity = '0';
+            badge.style.transition = 'opacity 0.5s ease-out';
+            setTimeout(() => badge.remove(), 500);
         }
-    }, 5000);
+    }, 4500);
 
     if (!badge) {
         badge = document.createElement('div');
@@ -46,7 +49,7 @@ function addStatusBadge(message: string): void {
 
         Object.assign(badge.style, {
             position: 'fixed',
-            top: '12px',
+            bottom: '12px',
             left: '12px',
             padding: '8px 12px',
             background: 'rgba(15, 23, 42, 0.85)',
@@ -69,28 +72,62 @@ export async function startAppSession(): Promise<AppSession> {
     console.group('[session] start');
     console.time('[session] total');
 
-    try {
-        const config = getMirisConfig();
+    let currentAppSession: AppSession | null = null;
+    let currentSceneId: string | null = null;
+    let currentViewerKey: string | undefined = undefined;
+
+    const config = getMirisConfig();
+
+    async function loadSceneDefinition(state: CameraState | null): Promise<SceneDefinition> {
+        if (state?.scene) {
+            try {
+                const scene = await loadSceneFromBuiltinId(state.scene);
+                currentSceneId = state.scene;
+                return scene;
+            } catch (e) {
+                console.error(`[session] failed to load scene from hash: ${state.scene}`, e);
+            }
+        }
+
+        const defaultSceneId = config.defaultScene;
+        if (defaultSceneId) {
+            try {
+                const scene = await loadSceneFromBuiltinId(defaultSceneId);
+                currentSceneId = defaultSceneId;
+                return scene;
+            } catch (e) {
+                console.error(`[session] failed to load default scene: ${defaultSceneId}`, e);
+            }
+        }
+
+        currentSceneId = null;
+        return createBlankScene();
+    }
+
+    async function initSession(sceneDefinition: SceneDefinition, initialState?: CameraState) {
+        if (currentAppSession) {
+            currentAppSession.dispose();
+            currentAppSession = null;
+        }
+
         const resolvedKeys: Record<string, string> = {};
         if (config.viewerKeys) {
             Object.assign(resolvedKeys, config.viewerKeys);
         }
-        if (tokyoMarketScene.viewerKeys) {
-            for (const group of tokyoMarketScene.viewerKeys) {
+        if (sceneDefinition.viewerKeys) {
+            for (const group of sceneDefinition.viewerKeys) {
                 Object.assign(resolvedKeys, group);
             }
         }
 
-        // Helper to resolve a key from literal or group
         const resolveKey = (key: string | undefined): string | undefined => {
             if (!key) return undefined;
-            // If the key exists in our map, use the mapped value
             if (resolvedKeys[key]) return resolvedKeys[key];
-            // Otherwise, it might be a literal key
             return key;
         };
 
-        const sceneViewerKey = resolveKey(tokyoMarketScene.viewerKey) || config.viewerKey;
+        const sceneViewerKey = resolveKey(sceneDefinition.viewerKey) || config.viewerKey;
+        currentViewerKey = sceneViewerKey;
 
         console.info('[config] resolved', {
             configViewerKey: config.viewerKey,
@@ -100,7 +137,6 @@ export async function startAppSession(): Promise<AppSession> {
         });
 
         const mount = ensureAppMount();
-        console.info('[dom] clearing mount');
         mount.innerHTML = '';
 
         addStatusBadge(
@@ -109,55 +145,37 @@ export async function startAppSession(): Promise<AppSession> {
                 : 'Miris compositor: fallback only, set VITE_MIRIS_VIEWER_KEY',
         );
 
-        console.time('[session] createSceneContext');
         const sceneContext = createSceneContext(mount, sceneViewerKey);
-        console.timeEnd('[session] createSceneContext');
-        console.info('[scene] context created', sceneContext);
-
-        console.time('[session] mirisReady');
-        console.info('[session] awaiting mirisReady...');
         await sceneContext.mirisReady;
-        console.timeEnd('[session] mirisReady');
-        console.info('[session] Miris context is ready');
 
-        console.time('[session] createMirisAdapter');
         const mirisAdapter = new MirisAdapter(sceneContext.scene);
-        console.timeEnd('[session] createMirisAdapter');
-        console.info('[miris] adapter created', mirisAdapter);
-
-        console.time('[session] createCompositor');
         const compositor = new Compositor(sceneContext, mirisAdapter);
-        console.timeEnd('[session] createCompositor');
-        console.info('[compositor] created', compositor);
 
-        console.time('[session] addDebugGround');
         compositor.addDebugGround();
-        console.timeEnd('[session] addDebugGround');
-        console.info('[compositor] debug ground added');
-
-        console.time('[session] loadScene');
-        await compositor.loadScene(tokyoMarketScene);
-        console.timeEnd('[session] loadScene');
-        console.info('[compositor] scene loaded');
-
-        console.time('[session] start');
+        await compositor.loadScene(sceneDefinition);
         compositor.start();
-        console.timeEnd('[session] start');
-        console.info('[compositor] started');
-
-        console.time('[session] compositor.ready');
         await compositor.ready;
-        console.timeEnd('[session] compositor.ready');
-        console.info('[session] Miris scene + streams fully ready');
 
-        const onHashChange = () => {
+        createSceneUI(async (file) => {
+            const newScene = await loadSceneFromFile(file);
+            currentSceneId = null;
+            initSession(newScene);
+        }, async (id) => {
+            const newScene = await loadSceneFromBuiltinId(id);
+            currentSceneId = id;
+            initSession(newScene);
+        });
+
+        const debouncedUpdateUrl = debounce(() => {
             if (isApplyingUrlState) return;
-            const state = getCameraStateFromUrl();
-            if (state) {
-                applyState(state);
-            }
-        };
-        
+            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
+        }, 500);
+
+        sceneContext.controls.setOnChange(debouncedUpdateUrl);
+        compositor.setOnSelectionChanged(() => {
+            debouncedUpdateUrl();
+        });
+
         let isApplyingUrlState = false;
         const applyState = (state: CameraState) => {
             console.log('[session] applyState', state);
@@ -166,18 +184,11 @@ export async function startAppSession(): Promise<AppSession> {
             const hasCoordinates = state.cx !== undefined && state.cy !== undefined && state.cz !== undefined &&
                                  state.qx !== undefined && state.qy !== undefined && state.qz !== undefined && state.qw !== undefined;
 
-            // 1. Establish anchor (aid)
             if (state.aid) {
-                // If we have coordinates, we just want to force the anchor without focusing
-                // If we don't have coordinates, we want to simulate a link click (anchor + focus)
                 const smooth = !hasCoordinates;
                 const requestLock = !hasCoordinates;
                 compositor.selectAsset(state.aid, smooth, requestLock, true);
             } else if (hasCoordinates || state.sid) {
-                // If coordinates are present but no aid, or if sid is present but no aid, ensure we are decoupled
-                // if aid is explicitly missing in a partial state that has sid, we might not want to decouple if we were anchored?
-                // The user said: "If it is only an sid, aid remains the same as it currently is, but we select the sid asset."
-                // So if state.aid is undefined, we DO NOT call selectAsset(null) unless it's explicitly 'null' or if we are applying a full state without aid.
                 if (hasCoordinates && !state.aid) {
                     compositor.selectAsset(null, false, false, true);
                 }
@@ -185,12 +196,10 @@ export async function startAppSession(): Promise<AppSession> {
                 compositor.selectAsset(null, false, false, true);
             }
 
-            // 2. Apply explicit selection if present (sid)
             if (state.sid !== undefined && state.sid !== state.aid) {
                 compositor.selectAsset(state.sid || null, false, false, false);
             }
 
-            // 3. Apply coordinates if all are present
             if (hasCoordinates) {
                 sceneContext.camera.position.set(state.cx!, state.cy!, state.cz!);
                 sceneContext.camera.quaternion.set(state.qx!, state.qy!, state.qz!, state.qw!).normalize();
@@ -198,26 +207,55 @@ export async function startAppSession(): Promise<AppSession> {
                 sceneContext.controls.getEuler().setFromQuaternion(sceneContext.camera.quaternion);
             }
             
-            // Re-sync URL immediately if we're now anchored to ensure any rounding is captured
-            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId());
+            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
             isApplyingUrlState = false;
         };
-        // Restore camera state if present in URL
-        const cameraState = getCameraStateFromUrl();
-        if (cameraState) {
-            console.info('[session] restoring camera state from URL', cameraState);
-            applyState(cameraState);
+
+        if (initialState) {
+            applyState(initialState);
+        } else {
+             // If no explicit state but scene has initial camera, use it
+             if (sceneDefinition.initialCamera) {
+                const { position, rotation } = sceneDefinition.initialCamera;
+                sceneContext.camera.position.set(position[0], position[1], position[2]);
+                sceneContext.camera.rotation.set(rotation[0], rotation[1], rotation[2]);
+                sceneContext.camera.updateMatrixWorld();
+                sceneContext.controls.getEuler().setFromQuaternion(sceneContext.camera.quaternion);
+            }
         }
 
-        // Setup URL sync
-        const debouncedUpdateUrl = debounce(() => {
+        const onHashChange = async () => {
             if (isApplyingUrlState) return;
-            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId());
-        }, 500);
-        sceneContext.controls.setOnChange(debouncedUpdateUrl);
-        compositor.setOnSelectionChanged(() => {
-            debouncedUpdateUrl();
-        });
+            const state = getCameraStateFromUrl();
+            if (!state) return;
+
+            // If scene changed in hash
+            if (state.scene !== undefined && state.scene !== currentSceneId) {
+                const newScene = await loadSceneDefinition(state);
+                
+                // Check if we need to reload context due to viewer key change
+                const newResolvedKeys: Record<string, string> = {};
+                if (config.viewerKeys) Object.assign(newResolvedKeys, config.viewerKeys);
+                if (newScene.viewerKeys) {
+                    for (const group of newScene.viewerKeys) Object.assign(newResolvedKeys, group);
+                }
+                const newSceneViewerKey = (newScene.viewerKey && newResolvedKeys[newScene.viewerKey]) || newScene.viewerKey || config.viewerKey;
+
+                if (newSceneViewerKey !== currentViewerKey) {
+                    console.info('[session] viewer key changed, full reload');
+                    initSession(newScene, state);
+                    return;
+                } else {
+                    console.info('[session] scene changed, updating compositor');
+                    currentSceneId = state.scene || null;
+                    await compositor.loadScene(newScene);
+                    applyState(state);
+                    return;
+                }
+            }
+
+            applyState(state);
+        };
 
         window.addEventListener('hashchange', onHashChange);
 
@@ -225,14 +263,11 @@ export async function startAppSession(): Promise<AppSession> {
             console.group('[session] dispose');
             window.removeEventListener('hashchange', onHashChange);
             try {
-                console.info('[compositor] disposing');
                 compositor.dispose();
             } catch (error) {
                 console.error('[compositor] dispose failed', error);
             }
-
             try {
-                console.info('[scene] disposing');
                 sceneContext.dispose();
             } catch (error) {
                 console.error('[scene] dispose failed', error);
@@ -240,12 +275,25 @@ export async function startAppSession(): Promise<AppSession> {
             console.groupEnd();
 
             const badge = document.getElementById('app-status-badge');
-            if (badge) {
-                badge.remove();
-            }
+            if (badge) badge.remove();
+            
+            const ui = document.getElementById('scene-ui-container');
+            if (ui) ui.remove();
         };
 
-        return { compositor, sceneContext, dispose };
+        currentAppSession = { compositor, sceneContext, dispose };
+    }
+
+    try {
+        const initialState = getCameraStateFromUrl();
+        const initialScene = await loadSceneDefinition(initialState);
+        await initSession(initialScene, initialState || undefined);
+
+        return {
+            get compositor() { return currentAppSession!.compositor; },
+            get sceneContext() { return currentAppSession!.sceneContext; },
+            dispose: () => currentAppSession?.dispose(),
+        };
     } catch (error) {
         console.error('[session] start failed', error);
         throw error;
@@ -253,4 +301,118 @@ export async function startAppSession(): Promise<AppSession> {
         console.timeEnd('[session] total');
         console.groupEnd();
     }
+}
+
+function createSceneUI(onFilePick: (file: File) => void, onBuiltinPick: (id: string) => void) {
+    let container = document.getElementById('scene-ui-container');
+    if (container) container.remove();
+
+    container = document.createElement('div');
+    container.id = 'scene-ui-container';
+    Object.assign(container.style, {
+        position: 'fixed',
+        top: '12px',
+        left: '12px',
+        zIndex: '1000',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        alignItems: 'flex-start',
+    });
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Load Scene';
+    Object.assign(btn.style, {
+        padding: '8px 16px',
+        background: '#3b82f6',
+        color: 'white',
+        border: 'none',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        fontWeight: 'bold',
+    });
+
+    const menu = document.createElement('div');
+    Object.assign(menu.style, {
+        display: 'none',
+        background: 'white',
+        border: '1px solid #ccc',
+        borderRadius: '6px',
+        padding: '8px',
+        flexDirection: 'column',
+        gap: '4px',
+        boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+    });
+
+    const publicScenes = [
+        { id: 'tokyo-market', label: 'Tokyo Market' },
+        { id: 'tokyo-market-miris-player', label: 'Tokyo Market (Player)' },
+        { id: 'tokyo-market-mixed-viewer-keys', label: 'Tokyo Market (Mixed Keys)' },
+    ];
+
+    publicScenes.forEach(scene => {
+        const item = document.createElement('button');
+        item.textContent = scene.label;
+        Object.assign(item.style, {
+            color: 'black',
+            padding: '4px 8px',
+            textAlign: 'left',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+        });
+        item.onmouseover = () => item.style.background = '#f3f4f6';
+        item.onmouseout = () => item.style.background = 'none';
+        item.onclick = () => {
+            onBuiltinPick(scene.id);
+            menu.style.display = 'none';
+        };
+        menu.appendChild(item);
+    });
+
+    const divider = document.createElement('div');
+    divider.style.height = '1px';
+    divider.style.background = '#ccc';
+    divider.style.margin = '4px 0';
+    menu.appendChild(divider);
+
+    const fileBtn = document.createElement('button');
+    fileBtn.textContent = 'Open Local File...';
+    Object.assign(fileBtn.style, {
+        color: 'black',
+        padding: '4px 8px',
+        textAlign: 'left',
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        fontStyle: 'italic',
+    });
+    fileBtn.onclick = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (file) onFilePick(file);
+        };
+        input.click();
+        menu.style.display = 'none';
+    };
+    menu.appendChild(fileBtn);
+
+    btn.onclick = (e) => {
+        e.stopPropagation();
+        menu.style.display = menu.style.display === 'none' ? 'flex' : 'none';
+    };
+
+    btn.onpointerdown = (e) => e.stopPropagation();
+    btn.onmousedown = (e) => e.stopPropagation();
+
+    menu.onpointerdown = (e) => e.stopPropagation();
+    menu.onmousedown = (e) => e.stopPropagation();
+    menu.onclick = (e) => e.stopPropagation();
+
+    container.appendChild(btn);
+    container.appendChild(menu);
+    document.body.appendChild(container);
 }

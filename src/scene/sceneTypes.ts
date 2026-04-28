@@ -1,4 +1,6 @@
-﻿export type DepthBand = 'foreground' | 'midground' | 'background';
+﻿// src/scene/sceneTypes.ts
+
+export type DepthBand = 'foreground' | 'midground' | 'background';
 export type SceneNodeId = string;
 export type Vec3 = [number, number, number];
 

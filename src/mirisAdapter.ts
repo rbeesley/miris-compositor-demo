@@ -1,4 +1,6 @@
-﻿import * as THREE from 'three';
+﻿// src/mirisAdapter.ts
+
+import * as THREE from 'three';
 import { MirisScene, MirisStream } from '@miris-inc/three';
 
 export interface MirisLoadRequest {
@@ -197,6 +199,11 @@ export class MirisAdapter {
     }
 
     private createFallbackWireframe(): THREE.LineSegments {
+        const material = new THREE.LineBasicMaterial({
+            color: 0x0f172a,
+            depthTest: true,
+            depthWrite: true,
+        });
         const wire = new THREE.LineSegments(
             new THREE.EdgesGeometry(
                 new THREE.BoxGeometry(
@@ -205,7 +212,7 @@ export class MirisAdapter {
                     MirisAdapter.FALLBACK_WIREFRAME_SIZE,
                 ),
             ),
-            new THREE.LineBasicMaterial({ color: 0x0f172a }),
+            material,
         );
         wire.position.y = 0.5;
         return wire;
@@ -255,9 +262,12 @@ export class MirisAdapter {
         const material = new THREE.SpriteMaterial({
             map: texture,
             transparent: true,
+            depthTest: true,
+            depthWrite: true,
         });
 
         const sprite = new THREE.Sprite(material);
+        sprite.renderOrder = 10;
         sprite.scale.set(1.8, 0.675, 1);
 
         return sprite;
@@ -268,8 +278,14 @@ export class MirisAdapter {
         // or we could use bounding boxes if streams provide them.
         // For now, let's use a 1.1x box for the aura/selection.
         const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1 + MirisAdapter.OUTLINE_PADDING, 1 + MirisAdapter.OUTLINE_PADDING, 1 + MirisAdapter.OUTLINE_PADDING));
-        const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+        const material = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: false,
+            depthTest: true,
+            depthWrite: true,
+        });
         const outline = new THREE.LineSegments(geometry, material);
+        outline.renderOrder = 5;
         outline.position.y = 0.5;
         outline.name = 'asset-outline';
         return outline;
@@ -287,6 +303,7 @@ export class MirisAdapter {
                 break;
             case 'hover':
                 outline.visible = true;
+                material.transparent = true;
                 material.opacity = 0.5;
                 material.color.set(0x3b82f6); // Blueish aura
                 // Partial wireframe effect is harder with LineSegments directly,
@@ -295,6 +312,7 @@ export class MirisAdapter {
                 break;
             case 'selected':
                 outline.visible = true;
+                material.transparent = false;
                 material.opacity = 1.0;
                 material.color.set(0xffffff); // White solid
                 break;

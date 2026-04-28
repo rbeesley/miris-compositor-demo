@@ -1,4 +1,6 @@
-﻿import * as THREE from 'three';
+﻿// src/scene.ts
+
+import * as THREE from 'three';
 import { CameraControls } from './controls/CameraControls';
 import { MirisScene } from '@miris-inc/three';
 

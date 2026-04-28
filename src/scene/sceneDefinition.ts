@@ -1,4 +1,6 @@
-﻿import type { SceneNodeDefinition, SceneNodeId, SceneCameraDefinition, ViewerKeyMap } from './sceneTypes';
+﻿// src/scene/sceneDefinition.ts
+
+import type { SceneNodeDefinition, SceneNodeId, SceneCameraDefinition, ViewerKeyMap } from './sceneTypes';
 
 export interface SceneDefinition {
     version: string;

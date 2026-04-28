@@ -1,4 +1,6 @@
-﻿declare module '@miris-inc/three' {
+﻿// src/types/miris-inc-three.d.ts
+
+declare module '@miris-inc/three' {
     import * as THREE from 'three';
 
     export class MirisScene extends THREE.Scene {

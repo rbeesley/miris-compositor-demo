@@ -1,4 +1,6 @@
-﻿import * as THREE from 'three';
+﻿// src/utils/urlState.ts
+
+import * as THREE from 'three';
 
 export type CameraState = {
     cx?: number;
@@ -10,9 +12,10 @@ export type CameraState = {
     qw?: number;
     aid?: string;
     sid?: string;
+    scene?: string;
 };
 
-export function updateUrlFromCamera(camera: THREE.Camera, cameraAnchor: THREE.Object3D, selectedAssetId?: string | null): void {
+export function updateUrlFromCamera(camera: THREE.Camera, cameraAnchor: THREE.Object3D, selectedAssetId?: string | null, sceneId?: string | null): void {
     const params = new URLSearchParams(window.location.hash.substring(1));
 
     const isAnchored = cameraAnchor.parent !== null && 
@@ -59,6 +62,12 @@ export function updateUrlFromCamera(camera: THREE.Camera, cameraAnchor: THREE.Ob
         params.delete('sid');
     }
 
+    if (sceneId) {
+        params.set('scene', sceneId);
+    } else {
+        params.delete('scene');
+    }
+
     const newHash = '#' + params.toString();
     if (window.location.hash !== newHash) {
         window.history.replaceState(null, '', newHash);
@@ -101,6 +110,9 @@ export function getCameraStateFromUrl(): CameraState | null {
 
     const sid = params.get('sid');
     if (sid) state.sid = sid;
+
+    const scene = params.get('scene');
+    if (scene) state.scene = scene;
 
     // Only return state if it has at least one valid parameter
     if (Object.keys(state).length === 0) {

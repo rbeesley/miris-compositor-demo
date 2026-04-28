@@ -1,4 +1,4 @@
-﻿// src/tools/generate-roses.ts
+﻿// tools/generate-roses.ts
 
 import { generateHemispherePoints, rotationFromNormal } from '../src/utils/roseGeometry';
 
