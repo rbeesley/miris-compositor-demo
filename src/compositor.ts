@@ -29,6 +29,8 @@ export class Compositor {
     private readonly pendingStreamLoads = new Set<string>();
     private readonly streamQueue: string[] = [];
     private allStreamsLoadedOnce = false;
+    private sceneLoadStartTime = 0;
+    private hasReportedTimeout = false;
     private readyResolve?: () => void;
     readonly ready: Promise<void>;
 
@@ -36,6 +38,7 @@ export class Compositor {
     private selectedAssetId: string | null = null;
     private anchorAssetId: string | null = null;
     private onSelectionChanged: ((id: string | null) => void) | null = null;
+    private onStatusChanged: ((message: string | null) => void) | null = null;
     private lastClickTime = 0;
     private static readonly DOUBLE_CLICK_THRESHOLD = 300;
     private readonly raycaster = new THREE.Raycaster();
@@ -375,6 +378,10 @@ export class Compositor {
         this.onSelectionChanged = callback;
     }
 
+    public setOnStatusChanged(callback: (message: string | null) => void): void {
+        this.onStatusChanged = callback;
+    }
+
     private decoupleAnchor(): void {
         const anchor = this.sceneContext.cameraAnchor;
         const camera = this.sceneContext.camera;
@@ -403,7 +410,48 @@ export class Compositor {
         camera.quaternion.copy(worldQuat);
     }
 
+    private reportErrors(): void {
+        const errorAssets: string[] = [];
+        const timeoutAssets: string[] = [];
+        const now = performance.now();
+        const isTimeout = this.sceneLoadStartTime > 0 && (now - this.sceneLoadStartTime > 8000);
+
+        for (const asset of this.runtimeAssets.values()) {
+            if (asset.loaded.error) {
+                errorAssets.push(asset.config.label || asset.config.id);
+            } else if (isTimeout && asset.config.streamId && asset.loaded.placeholder.visible) {
+                // If after 8 seconds the placeholder is still visible for a streamable asset,
+                // and no explicit error was caught, consider it a timeout/SDK failure.
+                timeoutAssets.push(asset.config.label || asset.config.id);
+            }
+        }
+
+        if (errorAssets.length > 0 || timeoutAssets.length > 0) {
+            if (this.onStatusChanged) {
+                const totalFailed = errorAssets.length + timeoutAssets.length;
+                this.onStatusChanged(`Warning: ${totalFailed} asset(s) failed to load (check viewer key)`);
+            }
+            
+            if (timeoutAssets.length > 0) {
+                console.warn('[compositor] Assets failed to replace placeholders (timeout):', timeoutAssets);
+            }
+        }
+    }
+
+    private checkLoadingTimeouts(): void {
+        if (this.allStreamsLoadedOnce || this.hasReportedTimeout || this.sceneLoadStartTime === 0) return;
+
+        const now = performance.now();
+        if (now - this.sceneLoadStartTime > 8000) {
+            this.hasReportedTimeout = true;
+            this.reportErrors();
+        }
+    }
+
     private checkAllMirisReady(): void {
+        // Check for explicitly recorded stream load errors
+        this.reportErrors();
+
         if (this.allStreamsLoadedOnce) return;
         if (!this.mirisSceneLoaded) {
             console.debug('[compositor] still waiting for mirisSceneLoaded');
@@ -445,6 +493,10 @@ export class Compositor {
     }
 
     async loadScene(sceneDef: SceneDefinition): Promise<void> {
+        this.sceneLoadStartTime = performance.now();
+        this.hasReportedTimeout = false;
+        this.allStreamsLoadedOnce = false;
+
         // Clear existing assets
         for (const asset of this.runtimeAssets.values()) {
             this.mirisAdapter.unload(asset.loaded);
@@ -722,7 +774,7 @@ export class Compositor {
         }
 
         this.runtimeAssets.clear();
-        this.sceneContext.dispose();
+        // this.sceneContext.dispose(); // Do not dispose sceneContext here as it's managed by appSession
     }
 
     private tick = (): void => {
@@ -752,6 +804,7 @@ export class Compositor {
         }
 
         this.updateCameraUI();
+        this.checkLoadingTimeouts();
 
         this.sceneContext.renderer.render(
             this.sceneContext.scene,
@@ -1014,6 +1067,8 @@ export class Compositor {
     }
 
     private createFocusUI(): void {
+        if (document.getElementById('focus-info-panel')) return;
+
         const panel = document.createElement('div');
         panel.id = 'focus-info-panel';
         Object.assign(panel.style, {
@@ -1036,6 +1091,8 @@ export class Compositor {
     }
 
     private createCameraDebugUI(): void {
+        if (document.getElementById('camera-debug-panel')) return;
+
         const panel = document.createElement('div');
         panel.id = 'camera-debug-panel';
         Object.assign(panel.style, {

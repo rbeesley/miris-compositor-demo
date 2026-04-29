@@ -18,42 +18,44 @@ export type CameraState = {
 export function updateUrlFromCamera(camera: THREE.Camera, cameraAnchor: THREE.Object3D, selectedAssetId?: string | null, sceneId?: string | null): void {
     const params = new URLSearchParams(window.location.hash.substring(1));
 
-    const isAnchored = cameraAnchor.parent !== null && 
-                       cameraAnchor.parent.type !== 'Scene' &&
-                       cameraAnchor.parent.parent !== null;
-    
-    let pos: THREE.Vector3;
-    let quat: THREE.Quaternion;
+    if (camera && cameraAnchor) {
+        const isAnchored = cameraAnchor.parent !== null && 
+                           cameraAnchor.parent.type !== 'Scene' &&
+                           cameraAnchor.parent.parent !== null;
+        
+        let pos: THREE.Vector3;
+        let quat: THREE.Quaternion;
 
-    if (isAnchored) {
-        // When anchored, we want coordinates relative to the anchor (which is the parent of cameraAnchor)
-        // camera.position is already relative to cameraAnchor, and cameraAnchor.position is (0,0,0) relative to its parent.
-        // So camera.position IS the relative position to the anchor.
-        pos = camera.position;
-        quat = camera.quaternion;
-    } else {
-        // When not anchored, we want world coordinates
-        pos = new THREE.Vector3();
-        quat = new THREE.Quaternion();
-        camera.getWorldPosition(pos);
-        camera.getWorldQuaternion(quat);
-    }
+        if (isAnchored) {
+            // When anchored, we want coordinates relative to the anchor (which is the parent of cameraAnchor)
+            // camera.position is already relative to cameraAnchor, and cameraAnchor.position is (0,0,0) relative to its parent.
+            // So camera.position IS the relative position to the anchor.
+            pos = camera.position;
+            quat = camera.quaternion;
+        } else {
+            // When not anchored, we want world coordinates
+            pos = new THREE.Vector3();
+            quat = new THREE.Quaternion();
+            camera.getWorldPosition(pos);
+            camera.getWorldQuaternion(quat);
+        }
 
-    params.set('cx', pos.x.toFixed(3));
-    params.set('cy', pos.y.toFixed(3));
-    params.set('cz', pos.z.toFixed(3));
+        params.set('cx', pos.x.toFixed(3));
+        params.set('cy', pos.y.toFixed(3));
+        params.set('cz', pos.z.toFixed(3));
 
-    params.set('qx', quat.x.toFixed(6));
-    params.set('qy', quat.y.toFixed(6));
-    params.set('qz', quat.z.toFixed(6));
-    params.set('qw', quat.w.toFixed(6));
+        params.set('qx', quat.x.toFixed(6));
+        params.set('qy', quat.y.toFixed(6));
+        params.set('qz', quat.z.toFixed(6));
+        params.set('qw', quat.w.toFixed(6));
 
-    if (isAnchored && cameraAnchor.parent) {
-        // In this project, anchor parents are named 'miris-asset:ID'
-        const aid = cameraAnchor.parent.name.replace('miris-asset:', '');
-        params.set('aid', aid);
-    } else {
-        params.delete('aid');
+        if (isAnchored && cameraAnchor.parent) {
+            // In this project, anchor parents are named 'miris-asset:ID'
+            const aid = cameraAnchor.parent.name.replace('miris-asset:', '');
+            params.set('aid', aid);
+        } else {
+            params.delete('aid');
+        }
     }
 
     if (selectedAssetId) {

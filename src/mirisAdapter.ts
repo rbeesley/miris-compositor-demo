@@ -21,6 +21,7 @@ export interface LoadedMirisAsset {
     stream?: MirisStream;
     usingFallback: boolean;
     metadata?: any;
+    error?: any;
 }
 
 export class MirisAdapter {
@@ -135,6 +136,7 @@ export class MirisAdapter {
 
                 stream.addEventListener('error', (event: any) => {
                     console.error(`[Miris ${request.id}] error`, event);
+                    asset.error = event;
                 });
 
                 // Check if already loaded

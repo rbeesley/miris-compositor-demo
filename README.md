@@ -46,7 +46,7 @@ VITE_MIRIS_VIEWER_KEYS='[{"group-a": "key-a"}, {"group-b": "key-b"}]'
 `VITE_MIRIS_VIEWER_KEY` is the key used to authenticate with Miris.  
 `VITE_MIRIS_VIEWER_KEYS` is a JSON array of viewer keys grouped by key groups.
 
-All three properties are optional. The compositor will load an empty scene if VITE_DEFAULT_SCENE is not set. VITE_MIRIS_VIEWER_KEY or VITE_MIRIS_VIEWER_KEYS may be configured in a scene definition file directly, but they are kept private using .env files and different .env files can be used for development and production allowing the use of different Viewer Keys development and production. It is advised to use the .env appropriate for your application and deployment.
+All three properties are optional. The compositor will load an empty scene if `VITE_DEFAULT_SCENE` is not set. `VITE_MIRIS_VIEWER_KEY` or `VITE_MIRIS_VIEWER_KEYS` may be configured in a scene definition file directly, but they are kept private using `.env` files, and different `.env` files can be used for development and production allowing the use of different Viewer Keys. It is advised to use the `.env` appropriate for your application and deployment.
 
 ### Installation
 1. Clone the repository.
@@ -56,16 +56,21 @@ npm install
 ```
 
 ### Development
-Start the local development server:
+Start the local development server (this updates the built-in scene manifest when launched):
 ```bash
 cp .env.example .env.development.local
 npm run dev
 ```
 
 ### Build
-Generate a production-ready build:
+Generate a production-ready build (this also updates the built-in scene manifest):
 ```bash
 npm run build
+```
+
+To update the scene manifest without a full build:
+```bash
+npm run generate:scenes
 ```
 
 ## Controls

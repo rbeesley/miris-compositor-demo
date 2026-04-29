@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "tokyo-market",
-  "label": "Tokyo Market Demo",
+  "id": "tokyo-market-personal-viewer-key",
+  "label": "Tokyo Market (Personal Viewer Key)",
   "rootNodeIds": [
     "tokyo-market"
   ],
