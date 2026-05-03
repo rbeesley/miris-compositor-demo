@@ -11,8 +11,8 @@ This project is a compositing engine capable of:
 - **Hierarchical Asset Positioning**: Assets are placed in a unified three.js scene with relative spatial coordinates (parent-child transforms).
 - ~~**Dynamic Priority Scoring**: Calculates real-time priority scores based on distance to camera, asset importance, and depth bands to optimize streaming resources.~~ (Miris SDK support is required for this feature.)
 - **Scene Interaction & Focus**: Select assets with a click to center the view, attach the camera to follow moving objects, and see live metadata from the Miris API.
-- **URL-based State Persistence**: Save and restore camera position, orientation, anchored assets, and selection state via the browser URL hash for easy sharing and bookmarking.
-- **Multi-Key Authentication**: Support for multiple viewer keys and key groups within a single scene (compositor-level implementation).
+- **URL-based State Persistence**: Save and restore camera position, orientation, anchored assets, and selection state via the browser URL hash. The application is resilient to asset loading failures and will continue to monitor URL changes even if some assets fail to load. Changes in the URL will override `initialCamera` settings in the scene definition.
+- **Multi-Key Authentication**: Support for multiple viewer keys and key groups within a single scene (compositor-level implementation). The engine handles scene-level and node-level key overrides.
 - **Custom Camera System**: A custom first-person style camera with world/local movement switching, anchoring to assets, and smooth focus transitions.
 - **Built-in Animations**: Supports rotations and customizable oscillations (bounce) with configurable directions and clipping behaviors.
 - **Modern Workflow**: Fast development using Vite and type-safe development with TypeScript.
@@ -63,14 +63,21 @@ npm run dev
 ```
 
 ### Build
+Create a production environment before building.  
 Generate a production-ready build (this also updates the built-in scene manifest):
 ```bash
+cp .env.example .env.production.local
 npm run build
 ```
 
 To update the scene manifest without a full build:
 ```bash
 npm run generate:scenes
+```
+
+Host the site with a service which supports Vite like `serve` or `vercel`.
+```bash
+npm run serve
 ```
 
 ## Controls
@@ -121,6 +128,7 @@ All parameters are optional, and the application will try to apply them, limitin
 
 - [**Architecture**](./docs/architecture.md): Core components and system design.
 - [**Scene Definition**](./docs/scene-definition.md): Documentation of the hierarchical JSON scene format.
+- [**YouTube - Demo**](https://youtu.be/LOm3WqlUVww)
 - **App Screenshot**:
   ![Miris Compositor Demo](./docs/miris-compositor-scene.png)
 

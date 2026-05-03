@@ -8,13 +8,13 @@
   "viewerKey": "miris-player-viewer-key",
   "initialCamera": {
     "position": [
-      0.35,
-      1.25,
-      2.8
+      -1.675,
+      0.383,
+      2.561
     ],
     "rotation": [
-      -0.15,
-      0.1,
+      0,
+      -0.65,
       0
     ]
   },

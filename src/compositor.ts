@@ -445,6 +445,13 @@ export class Compositor {
         if (now - this.sceneLoadStartTime > 8000) {
             this.hasReportedTimeout = true;
             this.reportErrors();
+            
+            // Even if not all streams loaded, we resolve ready so the app can continue
+            console.warn('[compositor] loading timeout reached, resolving ready state anyway');
+            if (this.readyResolve) {
+                this.readyResolve();
+                this.readyResolve = undefined;
+            }
         }
     }
 
@@ -492,7 +499,7 @@ export class Compositor {
         }
     }
 
-    async loadScene(sceneDef: SceneDefinition): Promise<void> {
+    async loadScene(sceneDef: SceneDefinition, skipInitialCamera = false): Promise<void> {
         this.sceneLoadStartTime = performance.now();
         this.hasReportedTimeout = false;
         this.allStreamsLoadedOnce = false;
@@ -532,14 +539,21 @@ export class Compositor {
             resolvedKeysCount: Object.keys(resolvedKeys).length
         });
 
-        // Set initial camera if provided
-        if (sceneDef.initialCamera) {
+        // Set initial camera if provided and not skipped
+        if (!skipInitialCamera && sceneDef.initialCamera) {
             const cam = sceneDef.initialCamera;
-            this.sceneContext.camera.position.set(cam.position[0], cam.position[1], cam.position[2]);
-            this.sceneContext.camera.rotation.set(cam.rotation[0], cam.rotation[1], cam.rotation[2]);
+            if (cam.position != undefined && (cam.position.length === 3) && (cam.position[0] != undefined) && (cam.position[1] != undefined) && (cam.position[2] != undefined)) {
+                this.sceneContext.camera.position.set(cam.position[0], cam.position[1], cam.position[2]);
+            }
             if (cam.zoom !== undefined) {
                 this.sceneContext.camera.zoom = cam.zoom;
             }
+            if (cam.quaternion != undefined && (cam.quaternion.length === 4) && (cam.quaternion[0] !== undefined) && (cam.quaternion[1] !== undefined) && (cam.quaternion[2] !== undefined) && (cam.quaternion[3] !== undefined)) {
+                this.sceneContext.camera.quaternion.set(cam.quaternion[0], cam.quaternion[1], cam.quaternion[2], cam.quaternion[3]).normalize();
+            } else if (cam.rotation != undefined && (cam.rotation.length === 3) && (cam.rotation[0] !== undefined) && (cam.rotation[1] !== undefined) && (cam.rotation[2] !== undefined)) {
+                this.sceneContext.camera.rotation.set(cam.rotation[0], cam.rotation[1], cam.rotation[2]);
+            }
+            this.sceneContext.camera.updateMatrixWorld();
             this.sceneContext.camera.updateProjectionMatrix();
             // Sync internal euler state of controls
             // @ts-ignore
@@ -630,6 +644,34 @@ export class Compositor {
                     );
                     this.sceneContext.scene.add(root);
                 }
+            }
+        }
+
+        // Apply initial camera anchor if specified and not skipped
+        if (!skipInitialCamera && sceneDef.initialCamera && sceneDef.initialCamera.anchor) {
+            const anchorId = sceneDef.initialCamera.anchor;
+            const runtimeAsset = this.runtimeAssets.get(anchorId);
+            if (runtimeAsset) {
+                console.info(`[compositor] anchoring initial camera to: ${anchorId}`);
+                const anchorObject = runtimeAsset.loaded.root;
+                const cameraAnchor = this.sceneContext.cameraAnchor;
+                
+                anchorObject.add(cameraAnchor);
+                cameraAnchor.position.set(0, 0, 0);
+                cameraAnchor.quaternion.set(0, 0, 0, 1);
+
+                // Inverse the parent's world scale for the anchor to keep camera scale 1,1,1
+                const parentScale = new THREE.Vector3();
+                anchorObject.getWorldScale(parentScale);
+                cameraAnchor.scale.set(
+                    parentScale.x !== 0 ? 1 / parentScale.x : 1,
+                    parentScale.y !== 0 ? 1 / parentScale.y : 1,
+                    parentScale.z !== 0 ? 1 / parentScale.z : 1
+                );
+                
+                this.anchorAssetId = anchorId;
+            } else {
+                console.warn(`[compositor] initialCamera anchor "${anchorId}" not found in nodes.`);
             }
         }
 

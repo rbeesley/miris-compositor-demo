@@ -61,7 +61,8 @@ export function createSceneContext(
     mirisScene.add(cameraAnchor);
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-    camera.position.set(1.5, 1.5, 2.5);
+    camera.position.set(1.5, 1.5, 1.5);
+    camera.quaternion.set(-0.144436, 0.378251, 0.059878, 0.912403).normalize();
     cameraAnchor.add(camera);
 
     const renderer = new THREE.WebGLRenderer({

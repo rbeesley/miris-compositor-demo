@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "id": "tokyo-market-miris-player-embedded-key",
   "label": "Tokyo Market (Scene Defined Viewer Key)",
   "rootNodeIds": [
@@ -8,15 +8,17 @@
   "viewerKey": "4YIGMPUj5-fL8n0jkp1kQpJktss_UaBDMW9jwJb08f4",
   "initialCamera": {
     "position": [
-      0.35,
-      1.25,
-      2.8
+      -1.145,
+      0.329,
+      2.837
     ],
-    "rotation": [
-      -0.15,
-      0.1,
-      0
-    ]
+    "quaternion": [
+      -0.107059,
+      -0.151213,
+      -0.016363,
+      0.982550
+    ],
+    "anchor": "tokyo-market"
   },
   "nodes": [
     {

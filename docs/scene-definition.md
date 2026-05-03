@@ -16,6 +16,14 @@ interface SceneDefinition {
   nodes: SceneNodeDefinition[]; // All nodes in the scene
   initialCamera?: SceneCameraDefinition; // Starting camera view
 }
+
+interface SceneCameraDefinition {
+  position?: [number, number, number]; // [x, y, z]
+  quaternion?: [number, number, number, number]; // [x, y, z, w]
+  rotation?: [number, number, number]; // [x, y, z] (radians, used if quaternion is not provided)
+  zoom?: number;
+  anchor?: string; // ID of the node to anchor the camera to on load
+}
 ```
 
 ## Viewer Keys
@@ -112,7 +120,7 @@ The compositor supports **relative transforms**. If a node has a `parentId`, its
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "id": "my-scene",
   "label": "My Demo Scene",
   "viewerKey": "environment-viewer-key",

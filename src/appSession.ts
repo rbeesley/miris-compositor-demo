@@ -106,15 +106,15 @@ export async function startAppSession(): Promise<AppSession> {
     const uiPromise = createSceneUI(async (file) => {
         const newScene = await loadSceneFromFile(file);
         currentSceneId = null;
-        initSession(newScene);
+        await initSession(newScene);
     }, async (id) => {
         currentSceneId = id;
         try {
             const newScene = await loadSceneFromBuiltinId(id);
-            initSession(newScene);
+            await initSession(newScene);
         } catch (e) {
             console.error(`[session] failed to load scene: ${id}`, e);
-            initSession(createBlankScene());
+            await initSession(createBlankScene());
         }
     });
 
@@ -173,7 +173,7 @@ export async function startAppSession(): Promise<AppSession> {
         await uiPromise;
 
         // Immediately update URL to reflect the new scene ID if we have one
-        if (currentSceneId) {
+        if (currentSceneId && !initialState) {
             updateUrlFromCamera(null as any, null as any, null, currentSceneId);
         }
 
@@ -189,91 +189,14 @@ export async function startAppSession(): Promise<AppSession> {
             }
         });
 
-        compositor.addDebugGround();
-        
-        try {
-            await compositor.loadScene(sceneDefinition);
-        } catch (error) {
-            console.error('[session] failed to fully load scene assets', error);
-            addStatusBadge('Failed to load some scene assets');
-        } finally {
-            compositor.start();
-            try {
-                await compositor.ready;
-            } catch (readyError) {
-                console.warn('[session] compositor.ready failed, but continuing', readyError);
-            }
-        }
-
-        const debouncedUpdateUrl = debounce(() => {
-            if (isApplyingUrlState) return;
-            console.log('[session] debounced update url, currentSceneId:', currentSceneId);
-            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
-        }, 500);
-
-        sceneContext.controls.setOnChange(debouncedUpdateUrl);
-        compositor.setOnSelectionChanged(() => {
-            debouncedUpdateUrl();
-        });
-
         let isApplyingUrlState = false;
-        const applyState = (state: CameraState) => {
-            console.log('[session] applyState', state);
-            isApplyingUrlState = true;
-            
-            try {
-                const hasCoordinates = state.cx !== undefined && state.cy !== undefined && state.cz !== undefined &&
-                                     state.qx !== undefined && state.qy !== undefined && state.qz !== undefined && state.qw !== undefined;
-
-                if (state.aid) {
-                    const smooth = !hasCoordinates;
-                    const requestLock = !hasCoordinates;
-                    compositor.selectAsset(state.aid, smooth, requestLock, true);
-                } else if (hasCoordinates || state.sid) {
-                    if (hasCoordinates && !state.aid) {
-                        compositor.selectAsset(null, false, false, true);
-                    }
-                } else if (state.aid === null) {
-                    compositor.selectAsset(null, false, false, true);
-                }
-
-                if (state.sid !== undefined && state.sid !== state.aid) {
-                    compositor.selectAsset(state.sid || null, false, false, false);
-                }
-
-                if (hasCoordinates) {
-                    sceneContext.camera.position.set(state.cx!, state.cy!, state.cz!);
-                    sceneContext.camera.quaternion.set(state.qx!, state.qy!, state.qz!, state.qw!).normalize();
-                    sceneContext.camera.updateMatrixWorld();
-                    sceneContext.controls.getEuler().setFromQuaternion(sceneContext.camera.quaternion);
-                }
-            } catch (e) {
-                console.warn('[session] error in applyState selection/camera sync:', e);
-            } finally {
-                updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
-                isApplyingUrlState = false;
-            }
-        };
-
-        if (initialState) {
-            applyState(initialState);
-        } else {
-             // If no explicit state but scene has initial camera, use it
-             if (sceneDefinition.initialCamera) {
-                const { position, rotation } = sceneDefinition.initialCamera;
-                sceneContext.camera.position.set(position[0], position[1], position[2]);
-                sceneContext.camera.rotation.set(rotation[0], rotation[1], rotation[2]);
-                sceneContext.camera.updateMatrixWorld();
-                sceneContext.controls.getEuler().setFromQuaternion(sceneContext.camera.quaternion);
-            }
-            // Ensure hash is updated even if no initialState was provided
-            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
-        }
 
         const onHashChange = async () => {
             if (isApplyingUrlState) return;
             const state = getCameraStateFromUrl();
             if (!state) return;
+
+            console.log('[session] onHashChange', state);
 
             // If scene changed in hash
             if (state.scene !== undefined && state.scene !== currentSceneId) {
@@ -289,13 +212,13 @@ export async function startAppSession(): Promise<AppSession> {
 
                 if (newSceneViewerKey !== currentViewerKey) {
                     console.info('[session] viewer key changed, full reload');
-                    initSession(newScene, state);
+                    await initSession(newScene, state);
                     return;
                 } else {
                     console.info('[session] scene changed, updating compositor');
                     currentSceneId = state.scene || null;
                     try {
-                        await compositor.loadScene(newScene);
+                        await compositor.loadScene(newScene, !!state);
                     } catch (e) {
                         console.error('[session] failed to load scene into existing compositor', e);
                     }
@@ -308,6 +231,111 @@ export async function startAppSession(): Promise<AppSession> {
         };
 
         window.addEventListener('hashchange', onHashChange);
+
+        let lastAppliedState: CameraState | null = null;
+
+        const debouncedUpdateUrl = debounce(() => {
+            if (isApplyingUrlState) return;
+            console.log('[session] debounced update url, currentSceneId:', currentSceneId);
+            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
+            lastAppliedState = getCameraStateFromUrl();
+        }, 500);
+
+        sceneContext.controls.setOnChange(debouncedUpdateUrl);
+        compositor.setOnSelectionChanged(() => {
+            debouncedUpdateUrl();
+        });
+
+        compositor.addDebugGround();
+        
+        try {
+            await compositor.loadScene(sceneDefinition, !!initialState);
+        } catch (error) {
+            console.error('[session] failed to fully load scene assets', error);
+            addStatusBadge('Failed to load some scene assets');
+        } finally {
+            compositor.start();
+            try {
+                await compositor.ready;
+            } catch (readyError) {
+                console.warn('[session] compositor.ready failed, but continuing', readyError);
+            }
+        }
+
+        const applyState = (state: CameraState) => {
+            console.log('[session] applyState', state);
+            isApplyingUrlState = true;
+            
+            try {
+                const hasCoordinates = state.cx !== undefined && state.cy !== undefined && state.cz !== undefined &&
+                                     state.qx !== undefined && state.qy !== undefined && state.qz !== undefined && state.qw !== undefined;
+
+                const aidChanged = state.aid !== lastAppliedState?.aid;
+                const cameraMatched = lastAppliedState && 
+                    state.cx === lastAppliedState.cx && state.cy === lastAppliedState.cy && state.cz === lastAppliedState.cz &&
+                    state.qx === lastAppliedState.qx && state.qy === lastAppliedState.qy && state.qz === lastAppliedState.qz && state.qw === lastAppliedState.qw;
+
+                // We use realtime camera (smooth ease from current position) if:
+                // 1. Aid changed but camera coords in hash didn't (manual URL edit of aid)
+                // 2. OR if we don't have coordinates at all (initial load with just aid)
+                const useRealtimeCameraForAnchor = (aidChanged && cameraMatched) || !hasCoordinates;
+
+                if (state.aid) {
+                    const smooth = useRealtimeCameraForAnchor;
+                    const requestLock = !hasCoordinates;
+                    const forceAnchor = aidChanged || !hasCoordinates;
+                    compositor.selectAsset(state.aid, smooth, requestLock, forceAnchor);
+                } else {
+                    // aid was removed OR not present in URL
+                    compositor.selectAsset(null, false, false, true);
+                }
+
+                if (state.sid !== undefined && state.sid !== state.aid) {
+                    compositor.selectAsset(state.sid || null, false, false, false);
+                }
+
+                if (hasCoordinates && !useRealtimeCameraForAnchor) {
+                    sceneContext.camera.position.set(state.cx!, state.cy!, state.cz!);
+                    sceneContext.camera.quaternion.set(state.qx!, state.qy!, state.qz!, state.qw!).normalize();
+                    sceneContext.camera.updateMatrixWorld();
+                    sceneContext.controls.getEuler().setFromQuaternion(sceneContext.camera.quaternion);
+                }
+            } catch (e) {
+                console.warn('[session] error in applyState selection/camera sync:', e);
+            } finally {
+                updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
+                lastAppliedState = getCameraStateFromUrl();
+                isApplyingUrlState = false;
+            }
+        };
+
+        if (initialState) {
+            applyState(initialState);
+        } else {
+             // If no explicit state but scene has initial camera, use it
+             if (sceneDefinition.initialCamera) {
+                const { position, rotation, quaternion, anchor } = sceneDefinition.initialCamera;
+                
+                // If anchor is specified, we rely on compositor.loadScene having already set it up,
+                // but we should ensure selection state matches if appropriate.
+                if (anchor) {
+                    compositor.selectAsset(anchor, false, false, true);
+                }
+
+                if (position) {
+                    sceneContext.camera.position.set(position[0], position[1], position[2]);
+                }
+                if (quaternion) {
+                    sceneContext.camera.quaternion.set(quaternion[0], quaternion[1], quaternion[2], quaternion[3]).normalize();
+                } else if (rotation) {
+                    sceneContext.camera.rotation.set(rotation[0], rotation[1], rotation[2]);
+                }
+                sceneContext.camera.updateMatrixWorld();
+                sceneContext.controls.getEuler().setFromQuaternion(sceneContext.camera.quaternion);
+            }
+            // Ensure hash is updated even if no initialState was provided
+            updateUrlFromCamera(sceneContext.camera, sceneContext.cameraAnchor, compositor.getSelectedAssetId(), currentSceneId);
+        }
 
         const dispose = () => {
             console.group('[session] dispose');

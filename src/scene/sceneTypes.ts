@@ -3,11 +3,14 @@
 export type DepthBand = 'foreground' | 'midground' | 'background';
 export type SceneNodeId = string;
 export type Vec3 = [number, number, number];
+export type Vec4 = [number, number, number, number];
 
 export interface SceneCameraDefinition {
-    position: Vec3;
-    rotation: Vec3; // Radians (X, Y, Z)
+    position?: Vec3;
+    quaternion?: Vec4;
+    rotation?: Vec3; // Radians (X, Y, Z)
     zoom?: number;
+    anchor?: string;
 }
 
 export interface SceneNodeAnimation {
